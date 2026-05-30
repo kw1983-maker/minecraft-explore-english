@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WordCraft — Explore &amp; Learn English</title>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+    }
+  }
+  </script>
+  <style>
+/*__CSS__*/
+  </style>
+</head>
+<body>
+  <!-- 3D canvas mounts here -->
+  <div id="game"></div>
+
+  <!-- Crosshair -->
+  <div id="crosshair" class="hidden">+</div>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div class="hud-row">
+      <span class="hud-pill">🗺️ Level <b id="hud-level">1</b></span>
+      <span class="hud-pill">🔑 Keys <b id="hud-keys">0</b>/<b id="hud-keys-total">0</b></span>
+      <span class="hud-pill">⭐ Score <b id="hud-score">0</b></span>
+      <span class="hud-pill">🔥 Streak <b id="hud-streak">0</b></span>
+    </div>
+    <div id="hud-tier" class="hud-tier">Vocabulary</div>
+  </div>
+
+  <!-- Hotbar (block inventory) -->
+  <div id="hotbar" class="hidden"></div>
+
+  <!-- Interaction prompt -->
+  <div id="prompt" class="hidden">Press <kbd>E</kbd> to answer the question</div>
+
+  <!-- Toast messages -->
+  <div id="toast" class="hidden"></div>
+
+  <!-- Start screen -->
+  <div id="start" class="overlay">
+    <div class="panel">
+      <h1 class="logo">WORD<span>CRAFT</span></h1>
+      <p class="tagline">Explore a blocky 3D world and learn English!</p>
+      <div class="how">
+        <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move &nbsp; <kbd>Space</kbd> Jump</div>
+        <div><kbd>Mouse</kbd> Look around</div>
+        <div><kbd>Left-click</kbd> ⛏️ Mine blocks</div>
+        <div><kbd>Right-click</kbd> 🧱 Place blocks</div>
+        <div><kbd>1</kbd>–<kbd>6</kbd> / scroll: pick a block</div>
+        <div><kbd>E</kbd> Answer / enter portal</div>
+      </div>
+      <p class="mission">🎯 <b>Mission:</b> Dig down to the glowing beacons to uncover buried question blocks, answer correctly to collect keys, build whatever you like along the way, then open the portal to advance!</p>
+      <button id="btn-play" class="btn-big">▶ Click to Play</button>
+      <p class="hint-text">Tip: click the screen any time to re-capture the mouse.</p>
+    </div>
+  </div>
+
+  <!-- Quiz overlay -->
+  <div id="quiz" class="overlay hidden">
+    <div class="panel quiz-panel">
+      <div class="quiz-top">
+        <span id="quiz-category" class="quiz-cat">Vocabulary</span>
+        <button id="quiz-close" class="quiz-close" title="Close">✕</button>
+      </div>
+      <div id="quiz-visual" class="quiz-visual"></div>
+      <h2 id="quiz-question" class="quiz-question"></h2>
+      <div id="quiz-options" class="quiz-options"></div>
+      <div id="quiz-feedback" class="quiz-feedback hidden"></div>
+      <div class="quiz-bottom">
+        <button id="quiz-hint" class="btn-small">💡 Hint</button>
+        <button id="quiz-continue" class="btn-small hidden">Continue ▶</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Level complete overlay -->
+  <div id="levelend" class="overlay hidden">
+    <div class="panel">
+      <h1 id="levelend-title" class="logo">LEVEL <span>COMPLETE!</span></h1>
+      <p id="levelend-msg" class="tagline"></p>
+      <div class="how" id="levelend-stats"></div>
+      <button id="btn-next" class="btn-big">Next Level ▶</button>
+    </div>
+  </div>
+
+  <!-- Loading -->
+  <div id="loading" class="overlay hidden">
+    <div class="panel"><p class="tagline">Building world…</p></div>
+  </div>
+
+  <script type="module">
+import * as THREE from 'three';
+/*__JS__*/
+  </script>
+
+  <!-- Fallback notice if the 3D engine fails to load (e.g. no internet on first run). -->
+  <script>
+    setTimeout(function () {
+      if (!window.WordCraft) {
+        var h = document.querySelector('#start .hint-text');
+        if (h) {
+          h.innerHTML = '⚠️ Could not load the 3D engine (Three.js). Please connect to the ' +
+            'internet for the first run (it is fetched from a CDN), then reload this page.';
+          h.style.color = '#ffd23f';
+        }
+      }
+    }, 5000);
+  </script>
+</body>
+</html>

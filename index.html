@@ -1,0 +1,1845 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WordCraft — Explore &amp; Learn English</title>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+    }
+  }
+  </script>
+  <style>
+/* ===== WordCraft styles — blocky / Minecraft-ish pixel UI ===== */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --grass: #6abe30;
+  --grass-dark: #4a8a1e;
+  --dirt: #8a5a2b;
+  --stone: #7d7d7d;
+  --gold: #ffd23f;
+  --green-ok: #5bd75b;
+  --red-bad: #ff5b5b;
+  --panel: #2b2b3c;
+  --panel-light: #3a3a52;
+  --ink: #f4f4f8;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: #0c0c14;
+  font-family: 'Trebuchet MS', 'Segoe UI', system-ui, sans-serif;
+  color: var(--ink);
+  -webkit-font-smoothing: none;
+}
+
+#game, #game canvas { display: block; width: 100vw; height: 100vh; }
+
+.hidden { display: none !important; }
+
+/* ===== Crosshair ===== */
+#crosshair {
+  position: fixed;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 26px;
+  color: rgba(255,255,255,0.85);
+  text-shadow: 0 0 3px #000;
+  pointer-events: none;
+  z-index: 20;
+  user-select: none;
+}
+
+/* ===== HUD ===== */
+#hud {
+  position: fixed;
+  top: 14px; left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  text-align: center;
+  pointer-events: none;
+  user-select: none;
+}
+.hud-row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.hud-pill {
+  background: rgba(20,20,30,0.7);
+  border: 2px solid rgba(255,255,255,0.15);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 15px;
+  letter-spacing: 0.3px;
+}
+.hud-pill b { color: var(--gold); }
+.hud-tier {
+  margin-top: 6px;
+  font-size: 13px;
+  color: #c9c9e0;
+  text-shadow: 0 1px 2px #000;
+}
+
+/* ===== Hotbar ===== */
+#hotbar {
+  position: fixed;
+  bottom: 16px; left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  z-index: 20;
+  user-select: none;
+}
+#hotbar .slot {
+  position: relative;
+  width: 56px; height: 56px;
+  background: rgba(20,20,30,0.72);
+  border: 3px solid rgba(255,255,255,0.18);
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+#hotbar .slot.sel { border-color: var(--gold); box-shadow: 0 0 10px rgba(255,210,63,0.6); }
+#hotbar .swatch {
+  width: 30px; height: 30px;
+  border-radius: 4px;
+  border: 2px solid rgba(0,0,0,0.35);
+  image-rendering: pixelated;
+}
+#hotbar .count {
+  position: absolute;
+  bottom: 2px; right: 5px;
+  font-size: 13px;
+  font-weight: bold;
+  color: #fff;
+  text-shadow: 1px 1px 2px #000;
+}
+#hotbar .num {
+  position: absolute;
+  top: 2px; left: 5px;
+  font-size: 11px;
+  color: #b9b9d6;
+}
+
+/* ===== Interaction prompt ===== */
+#prompt {
+  position: fixed;
+  bottom: 90px; left: 50%;
+  transform: translateX(-50%);
+  background: rgba(20,20,30,0.82);
+  border: 2px solid var(--gold);
+  border-radius: 6px;
+  padding: 10px 18px;
+  font-size: 16px;
+  z-index: 20;
+  animation: bob 1.2s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes bob { 0%,100%{ transform: translateX(-50%) translateY(0);} 50%{ transform: translateX(-50%) translateY(-6px);} }
+
+/* ===== Toast ===== */
+#toast {
+  position: fixed;
+  top: 90px; left: 50%;
+  transform: translateX(-50%);
+  background: rgba(20,20,30,0.9);
+  border-left: 6px solid var(--gold);
+  border-radius: 6px;
+  padding: 12px 22px;
+  font-size: 18px;
+  font-weight: bold;
+  z-index: 30;
+  pointer-events: none;
+  animation: pop 0.3s ease;
+}
+@keyframes pop { from { transform: translateX(-50%) scale(0.8); opacity: 0;} to { transform: translateX(-50%) scale(1); opacity: 1;} }
+
+/* ===== Overlays ===== */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at center, rgba(30,30,50,0.85), rgba(8,8,16,0.95));
+  backdrop-filter: blur(3px);
+}
+
+kbd {
+  display: inline-block;
+  background: #1c1c28;
+  border: 2px solid #555;
+  border-bottom-width: 4px;
+  border-radius: 5px;
+  padding: 2px 8px;
+  font-family: inherit;
+  font-size: 13px;
+  margin: 0 2px;
+}
+
+.panel {
+  background: var(--panel);
+  border: 4px solid #1a1a26;
+  box-shadow: 0 0 0 4px #4a4a66, 0 16px 40px rgba(0,0,0,0.6);
+  border-radius: 10px;
+  padding: 34px 40px;
+  max-width: 620px;
+  width: 92%;
+  text-align: center;
+}
+
+.logo {
+  font-size: 56px;
+  letter-spacing: 4px;
+  line-height: 1;
+  text-shadow: 4px 4px 0 #1a1a26, 0 0 18px rgba(106,190,48,0.4);
+  color: var(--grass);
+}
+.logo span { color: var(--gold); }
+
+.tagline { font-size: 19px; margin: 14px 0 22px; color: #d6d6ec; }
+
+.how {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 18px;
+  background: rgba(0,0,0,0.25);
+  border-radius: 8px;
+  padding: 16px;
+  margin: 0 auto 18px;
+  max-width: 440px;
+  font-size: 15px;
+  text-align: left;
+}
+
+.mission {
+  font-size: 15px;
+  color: #cfe8c0;
+  background: rgba(106,190,48,0.12);
+  border: 2px solid rgba(106,190,48,0.4);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin-bottom: 22px;
+}
+
+.btn-big {
+  font-family: inherit;
+  font-size: 22px;
+  font-weight: bold;
+  color: #1a1a26;
+  background: var(--gold);
+  border: none;
+  border-bottom: 5px solid #c9a528;
+  border-radius: 8px;
+  padding: 14px 36px;
+  cursor: pointer;
+  transition: transform 0.08s, filter 0.15s;
+}
+.btn-big:hover { filter: brightness(1.08); }
+.btn-big:active { transform: translateY(3px); border-bottom-width: 2px; }
+
+.hint-text { margin-top: 16px; font-size: 13px; color: #9a9ab8; }
+
+/* ===== Quiz ===== */
+.quiz-panel { max-width: 560px; }
+.quiz-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.quiz-cat {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--gold);
+  background: rgba(255,210,63,0.12);
+  border: 1px solid rgba(255,210,63,0.4);
+  padding: 4px 10px;
+  border-radius: 5px;
+}
+.quiz-close {
+  background: none; border: none; color: #9a9ab8;
+  font-size: 20px; cursor: pointer; line-height: 1;
+}
+.quiz-close:hover { color: #fff; }
+
+.quiz-visual { font-size: 72px; line-height: 1; margin: 6px 0; min-height: 0; }
+.quiz-visual:empty { display: none; }
+
+.quiz-question { font-size: 26px; margin: 10px 0 22px; color: #fff; }
+
+.quiz-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.opt {
+  font-family: inherit;
+  font-size: 18px;
+  color: var(--ink);
+  background: var(--panel-light);
+  border: 3px solid #1a1a26;
+  border-bottom-width: 5px;
+  border-radius: 8px;
+  padding: 16px 12px;
+  cursor: pointer;
+  transition: transform 0.08s, filter 0.15s, background 0.15s;
+}
+.opt:hover:not(:disabled) { filter: brightness(1.15); }
+.opt:active:not(:disabled) { transform: translateY(3px); border-bottom-width: 2px; }
+.opt:disabled { cursor: default; }
+.opt.correct { background: var(--green-ok); color: #06340a; border-color: #2f7a2f; }
+.opt.wrong { background: var(--red-bad); color: #3a0606; border-color: #8a2222; }
+
+.quiz-feedback {
+  margin-top: 18px;
+  font-size: 16px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  text-align: left;
+}
+.quiz-feedback.ok { background: rgba(91,215,91,0.15); border: 2px solid var(--green-ok); }
+.quiz-feedback.bad { background: rgba(255,91,91,0.12); border: 2px solid var(--red-bad); }
+
+.quiz-bottom { display: flex; justify-content: center; gap: 12px; margin-top: 20px; }
+.btn-small {
+  font-family: inherit;
+  font-size: 15px;
+  color: var(--ink);
+  background: var(--panel-light);
+  border: 2px solid #1a1a26;
+  border-bottom-width: 4px;
+  border-radius: 7px;
+  padding: 9px 20px;
+  cursor: pointer;
+}
+.btn-small:hover { filter: brightness(1.12); }
+.btn-small:active { transform: translateY(2px); border-bottom-width: 2px; }
+
+#levelend-stats { grid-template-columns: 1fr; text-align: center; }
+
+@media (max-width: 560px) {
+  .logo { font-size: 40px; }
+  .quiz-options { grid-template-columns: 1fr; }
+  .how { grid-template-columns: 1fr; }
+}
+
+  </style>
+</head>
+<body>
+  <!-- 3D canvas mounts here -->
+  <div id="game"></div>
+
+  <!-- Crosshair -->
+  <div id="crosshair" class="hidden">+</div>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div class="hud-row">
+      <span class="hud-pill">🗺️ Level <b id="hud-level">1</b></span>
+      <span class="hud-pill">🔑 Keys <b id="hud-keys">0</b>/<b id="hud-keys-total">0</b></span>
+      <span class="hud-pill">⭐ Score <b id="hud-score">0</b></span>
+      <span class="hud-pill">🔥 Streak <b id="hud-streak">0</b></span>
+    </div>
+    <div id="hud-tier" class="hud-tier">Vocabulary</div>
+  </div>
+
+  <!-- Hotbar (block inventory) -->
+  <div id="hotbar" class="hidden"></div>
+
+  <!-- Interaction prompt -->
+  <div id="prompt" class="hidden">Press <kbd>E</kbd> to answer the question</div>
+
+  <!-- Toast messages -->
+  <div id="toast" class="hidden"></div>
+
+  <!-- Start screen -->
+  <div id="start" class="overlay">
+    <div class="panel">
+      <h1 class="logo">WORD<span>CRAFT</span></h1>
+      <p class="tagline">Explore a blocky 3D world and learn English!</p>
+      <div class="how">
+        <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move &nbsp; <kbd>Space</kbd> Jump</div>
+        <div><kbd>Mouse</kbd> Look around</div>
+        <div><kbd>Left-click</kbd> ⛏️ Mine blocks</div>
+        <div><kbd>Right-click</kbd> 🧱 Place blocks</div>
+        <div><kbd>1</kbd>–<kbd>6</kbd> / scroll: pick a block</div>
+        <div><kbd>E</kbd> Answer / enter portal</div>
+      </div>
+      <p class="mission">🎯 <b>Mission:</b> Dig down to the glowing beacons to uncover buried question blocks, answer correctly to collect keys, build whatever you like along the way, then open the portal to advance!</p>
+      <button id="btn-play" class="btn-big">▶ Click to Play</button>
+      <p class="hint-text">Tip: click the screen any time to re-capture the mouse.</p>
+    </div>
+  </div>
+
+  <!-- Quiz overlay -->
+  <div id="quiz" class="overlay hidden">
+    <div class="panel quiz-panel">
+      <div class="quiz-top">
+        <span id="quiz-category" class="quiz-cat">Vocabulary</span>
+        <button id="quiz-close" class="quiz-close" title="Close">✕</button>
+      </div>
+      <div id="quiz-visual" class="quiz-visual"></div>
+      <h2 id="quiz-question" class="quiz-question"></h2>
+      <div id="quiz-options" class="quiz-options"></div>
+      <div id="quiz-feedback" class="quiz-feedback hidden"></div>
+      <div class="quiz-bottom">
+        <button id="quiz-hint" class="btn-small">💡 Hint</button>
+        <button id="quiz-continue" class="btn-small hidden">Continue ▶</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Level complete overlay -->
+  <div id="levelend" class="overlay hidden">
+    <div class="panel">
+      <h1 id="levelend-title" class="logo">LEVEL <span>COMPLETE!</span></h1>
+      <p id="levelend-msg" class="tagline"></p>
+      <div class="how" id="levelend-stats"></div>
+      <button id="btn-next" class="btn-big">Next Level ▶</button>
+    </div>
+  </div>
+
+  <!-- Loading -->
+  <div id="loading" class="overlay hidden">
+    <div class="panel"><p class="tagline">Building world…</p></div>
+  </div>
+
+  <script type="module">
+import * as THREE from 'three';
+// ===== js/textures.js =====
+// Procedural pixel-art block textures drawn on <canvas>.
+// No external image assets -> works offline, no CORS issues.
+
+const SIZE = 16; // texels per block face
+
+// Small deterministic RNG so textures look consistent each build.
+function mulberry32(seed) {
+  return function () {
+    seed |= 0; seed = (seed + 0x6D2B79F5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Fill a canvas with a base color + per-pixel noise speckle.
+function makeNoisyCanvas(base, speckle, seed, opts = {}) {
+  const c = document.createElement('canvas');
+  c.width = c.height = SIZE;
+  const ctx = c.getContext('2d');
+  const rng = mulberry32(seed);
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, SIZE, SIZE);
+  for (let y = 0; y < SIZE; y++) {
+    for (let x = 0; x < SIZE; x++) {
+      if (rng() < (opts.density ?? 0.5)) {
+        const s = speckle[Math.floor(rng() * speckle.length)];
+        ctx.fillStyle = s;
+        ctx.fillRect(x, y, 1, 1);
+      }
+    }
+  }
+  if (opts.grassTop) {
+    // green fringe dripping down a couple pixels (side-of-grass look)
+    for (let x = 0; x < SIZE; x++) {
+      const h = 2 + Math.floor(rng() * 3);
+      ctx.fillStyle = rng() < 0.5 ? '#5aa82a' : '#6abe30';
+      ctx.fillRect(x, 0, 1, h);
+    }
+  }
+  return c;
+}
+
+function texFromCanvas(canvas) {
+  const t = new THREE.CanvasTexture(canvas);
+  t.magFilter = THREE.NearestFilter; // crisp pixels
+  t.minFilter = THREE.NearestFilter;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+// Cache so we build each texture only once.
+const cache = {};
+function tex(name, build) {
+  if (!cache[name]) cache[name] = texFromCanvas(build());
+  return cache[name];
+}
+
+// Build a BoxGeometry material set [+x,-x,+y,-y,+z,-z].
+// `faces` can give different textures for top/side/bottom.
+function blockMaterials({ top, side, bottom }) {
+  const mTop = new THREE.MeshLambertMaterial({ map: top });
+  const mSide = new THREE.MeshLambertMaterial({ map: side });
+  const mBottom = new THREE.MeshLambertMaterial({ map: bottom ?? side });
+  return [mSide, mSide, mTop, mBottom, mSide, mSide];
+}
+
+// ---- Public block definitions ----
+const BlockTex = {
+  grassTop: () => tex('grassTop', () =>
+    makeNoisyCanvas('#6abe30', ['#5aa82a', '#7cce3c', '#4a8a1e'], 11, { density: 0.7 })),
+  grassSide: () => tex('grassSide', () =>
+    makeNoisyCanvas('#8a5a2b', ['#7a4f24', '#9a6635', '#6e451f'], 12, { density: 0.6, grassTop: true })),
+  dirt: () => tex('dirt', () =>
+    makeNoisyCanvas('#8a5a2b', ['#7a4f24', '#9a6635', '#6e451f'], 13, { density: 0.6 })),
+  stone: () => tex('stone', () =>
+    makeNoisyCanvas('#7d7d7d', ['#6e6e6e', '#8c8c8c', '#666666'], 14, { density: 0.5 })),
+  sand: () => tex('sand', () =>
+    makeNoisyCanvas('#e3d39b', ['#d8c789', '#eaddb0', '#cdbb7c'], 15, { density: 0.5 })),
+  wood: () => tex('wood', () =>
+    makeNoisyCanvas('#6b4a25', ['#5c3f1f', '#7a572c', '#4f3619'], 16, { density: 0.4 })),
+  woodTop: () => tex('woodTop', () =>
+    makeNoisyCanvas('#9a7038', ['#876230', '#a87b40'], 17, { density: 0.5 })),
+  leaves: () => tex('leaves', () =>
+    makeNoisyCanvas('#3f8a2e', ['#347526', '#4aa036', '#2c6620'], 18, { density: 0.7 })),
+  water: () => tex('water', () =>
+    makeNoisyCanvas('#2f6fd8', ['#2a64c4', '#3a7ce8'], 19, { density: 0.3 })),
+};
+
+// Glowing "?" texture + materials for question blocks.
+function questionCanvas() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 64;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#ffd23f';
+  ctx.fillRect(0, 0, 64, 64);
+  ctx.fillStyle = '#c9a528';
+  ctx.fillRect(0, 0, 64, 6); ctx.fillRect(0, 58, 64, 6);
+  ctx.fillRect(0, 0, 6, 64); ctx.fillRect(58, 0, 6, 64);
+  ctx.fillStyle = '#3a2a00';
+  ctx.font = 'bold 44px Arial';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('?', 32, 36);
+  return c;
+}
+let _qMats = null;
+function getQuestionMaterials() {
+  if (_qMats) return _qMats;
+  const map = texFromCanvas(questionCanvas());
+  const mat = new THREE.MeshLambertMaterial({ map, emissive: 0xffaa00, emissiveIntensity: 0.7 });
+  _qMats = [mat, mat, mat, mat, mat, mat];
+  return _qMats;
+}
+
+// Materials per block type, built lazily.
+const matCache = {};
+function getBlockMaterials(type) {
+  if (matCache[type]) return matCache[type];
+  let mats;
+  switch (type) {
+    case 'grass':
+      mats = blockMaterials({ top: BlockTex.grassTop(), side: BlockTex.grassSide(), bottom: BlockTex.dirt() });
+      break;
+    case 'dirt':
+      mats = blockMaterials({ top: BlockTex.dirt(), side: BlockTex.dirt() });
+      break;
+    case 'stone':
+      mats = blockMaterials({ top: BlockTex.stone(), side: BlockTex.stone() });
+      break;
+    case 'sand':
+      mats = blockMaterials({ top: BlockTex.sand(), side: BlockTex.sand() });
+      break;
+    case 'wood':
+      mats = blockMaterials({ top: BlockTex.woodTop(), side: BlockTex.wood(), bottom: BlockTex.woodTop() });
+      break;
+    case 'leaves':
+      mats = blockMaterials({ top: BlockTex.leaves(), side: BlockTex.leaves() });
+      break;
+    default:
+      mats = blockMaterials({ top: BlockTex.dirt(), side: BlockTex.dirt() });
+  }
+  matCache[type] = mats;
+  return mats;
+}
+
+// ===== js/audio.js =====
+// Tiny WebAudio sound-effect engine. All sounds are synthesized in code,
+// so there are no audio files to load.
+
+let ctx = null;
+
+function ac() {
+  if (!ctx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    ctx = new AC();
+  }
+  // Browsers require a user gesture before audio can start.
+  if (ctx.state === 'suspended') ctx.resume();
+  return ctx;
+}
+
+// Play a single tone.
+function tone(freq, start, dur, type = 'square', gain = 0.15) {
+  const a = ac();
+  const osc = a.createOscillator();
+  const g = a.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, a.currentTime + start);
+  g.gain.setValueAtTime(0.0001, a.currentTime + start);
+  g.gain.exponentialRampToValueAtTime(gain, a.currentTime + start + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.0001, a.currentTime + start + dur);
+  osc.connect(g).connect(a.destination);
+  osc.start(a.currentTime + start);
+  osc.stop(a.currentTime + start + dur + 0.02);
+}
+
+const Sfx = {
+  // call once on first user gesture to unlock audio
+  unlock() { try { ac(); } catch (_) {} },
+
+  correct() {
+    tone(523.25, 0, 0.12, 'square', 0.18); // C5
+    tone(659.25, 0.10, 0.12, 'square', 0.18); // E5
+    tone(783.99, 0.20, 0.18, 'square', 0.2); // G5
+  },
+  wrong() {
+    tone(196, 0, 0.18, 'sawtooth', 0.16);
+    tone(146.83, 0.14, 0.22, 'sawtooth', 0.16);
+  },
+  collect() {
+    tone(880, 0, 0.08, 'square', 0.15);
+    tone(1174.66, 0.07, 0.12, 'square', 0.15);
+  },
+  jump() {
+    tone(330, 0, 0.08, 'triangle', 0.1);
+  },
+  portal() {
+    tone(440, 0, 0.18, 'sine', 0.18);
+    tone(554.37, 0.12, 0.18, 'sine', 0.18);
+    tone(659.25, 0.24, 0.18, 'sine', 0.18);
+    tone(880, 0.36, 0.4, 'sine', 0.2);
+  },
+  click() {
+    tone(600, 0, 0.05, 'square', 0.08);
+  },
+};
+
+// ===== js/questions.js =====
+// Question bank for ESL beginners — vocabulary + grammar.
+// Organized into 3 tiers (mapped to levels). Each question:
+//   { visual?: emoji/picture, category, q: question text, options: [...],
+//     answer: index of correct option, hint?, explain? }
+// All multiple-choice so they grade automatically (no typing barrier).
+// Easy to extend: just add objects to any tier array.
+
+const TIERS = [
+  // ---------- Tier 1: Vocabulary basics ----------
+  {
+    name: 'Vocabulary',
+    questions: [
+      { visual: '🐶', category: 'Animals', q: 'What is this animal?', options: ['Cat', 'Dog', 'Cow', 'Fish'], answer: 1, hint: 'It says "woof!"', explain: 'A dog is a friendly pet that barks.' },
+      { visual: '🍎', category: 'Food', q: 'What is this fruit?', options: ['Banana', 'Grape', 'Apple', 'Orange'], answer: 2, hint: 'It is red and round.', explain: 'An apple is a red or green fruit.' },
+      { visual: '🐱', category: 'Animals', q: 'What is this animal?', options: ['Cat', 'Lion', 'Mouse', 'Bird'], answer: 0, hint: 'It says "meow!"', explain: 'A cat is a small pet that says meow.' },
+      { visual: '🔴', category: 'Colors', q: 'What color is this?', options: ['Blue', 'Green', 'Red', 'Yellow'], answer: 2, hint: 'The color of strawberries.', explain: 'This color is red.' },
+      { visual: '☀️', category: 'Nature', q: 'What is this?', options: ['Moon', 'Sun', 'Star', 'Cloud'], answer: 1, hint: 'It shines in the day.', explain: 'The sun gives us light during the day.' },
+      { visual: '🏠', category: 'Objects', q: 'What is this?', options: ['House', 'Car', 'Tree', 'Boat'], answer: 0, hint: 'People live in it.', explain: 'A house is where people live.' },
+      { visual: '🐟', category: 'Animals', q: 'What is this animal?', options: ['Bird', 'Frog', 'Fish', 'Snake'], answer: 2, hint: 'It swims in water.', explain: 'A fish lives and swims in water.' },
+      { visual: '🍌', category: 'Food', q: 'What is this fruit?', options: ['Banana', 'Lemon', 'Pear', 'Mango'], answer: 0, hint: 'It is long and yellow.', explain: 'A banana is a long yellow fruit.' },
+      { visual: '🌳', category: 'Nature', q: 'What is this?', options: ['Flower', 'Tree', 'Grass', 'Bush'], answer: 1, hint: 'It is tall with leaves.', explain: 'A tree is a tall plant with a trunk and leaves.' },
+      { visual: '3️⃣', category: 'Numbers', q: 'What number is this?', options: ['Two', 'Five', 'Three', 'Eight'], answer: 2, hint: 'Comes after two.', explain: 'This is the number three (3).' },
+      { visual: '🐮', category: 'Animals', q: 'What is this animal?', options: ['Pig', 'Cow', 'Goat', 'Horse'], answer: 1, hint: 'It gives us milk.', explain: 'A cow gives us milk and says "moo".' },
+      { visual: '🔵', category: 'Colors', q: 'What color is this?', options: ['Blue', 'Pink', 'Brown', 'Gray'], answer: 0, hint: 'The color of the sky.', explain: 'This color is blue.' },
+      { visual: '🚗', category: 'Objects', q: 'What is this?', options: ['Bus', 'Bike', 'Car', 'Train'], answer: 2, hint: 'It has four wheels and a driver.', explain: 'A car is a vehicle people drive.' },
+      { visual: '⭐', category: 'Nature', q: 'What is this?', options: ['Sun', 'Star', 'Moon', 'Rain'], answer: 1, hint: 'You see many at night.', explain: 'A star shines in the night sky.' },
+      { visual: '🍞', category: 'Food', q: 'What is this?', options: ['Cake', 'Bread', 'Rice', 'Egg'], answer: 1, hint: 'You make sandwiches with it.', explain: 'Bread is a common food made from flour.' },
+    ],
+  },
+
+  // ---------- Tier 2: Vocabulary + simple grammar ----------
+  {
+    name: 'Words & Grammar',
+    questions: [
+      { category: 'Grammar', q: 'I ___ a student.', options: ['am', 'is', 'are', 'be'], answer: 0, hint: 'Use with "I".', explain: 'With "I" we use "am": I am a student.' },
+      { category: 'Grammar', q: 'She ___ happy.', options: ['am', 'are', 'is', 'be'], answer: 2, hint: 'Use with "she/he/it".', explain: 'With "she" we use "is": She is happy.' },
+      { category: 'Plurals', q: 'One cat, two ___.', options: ['cat', 'cats', 'cates', 'caties'], answer: 1, hint: 'Add -s for more than one.', explain: 'Most plurals just add -s: cats.' },
+      { category: 'Grammar', q: 'They ___ my friends.', options: ['is', 'am', 'are', 'be'], answer: 2, hint: 'Use with "they/we/you".', explain: 'With "they" we use "are": They are my friends.' },
+      { category: 'Vocabulary', q: 'The opposite of "big" is ___.', options: ['tall', 'small', 'long', 'wide'], answer: 1, hint: 'Something tiny.', explain: 'The opposite of big is small.' },
+      { category: 'Plurals', q: 'One box, two ___.', options: ['boxs', 'boxes', 'box', 'boxies'], answer: 1, hint: 'Words ending in -x add -es.', explain: 'Box becomes boxes (add -es).' },
+      { category: 'Vocabulary', q: 'The opposite of "hot" is ___.', options: ['warm', 'cold', 'wet', 'soft'], answer: 1, hint: 'Like ice.', explain: 'The opposite of hot is cold.' },
+      { category: 'Grammar', q: 'I have ___ apple.', options: ['a', 'an', 'the', 'some'], answer: 1, hint: 'Apple starts with a vowel sound.', explain: 'Use "an" before vowel sounds: an apple.' },
+      { category: 'Grammar', q: 'He ___ to school every day.', options: ['go', 'goes', 'going', 'gone'], answer: 1, hint: 'With "he", add -s.', explain: 'With he/she/it, add -s: He goes to school.' },
+      { category: 'Vocabulary', q: 'Which one is a color?', options: ['Chair', 'Green', 'Run', 'Loud'], answer: 1, hint: 'Look for the color word.', explain: 'Green is a color.' },
+      { category: 'Plurals', q: 'One baby, two ___.', options: ['babys', 'babyes', 'babies', 'baby'], answer: 2, hint: 'Change -y to -ies.', explain: 'Baby becomes babies (y → ies).' },
+      { category: 'Grammar', q: 'We ___ playing football.', options: ['is', 'am', 'are', 'be'], answer: 2, hint: 'Use with "we".', explain: 'With "we" we use "are": We are playing.' },
+      { category: 'Vocabulary', q: 'The opposite of "happy" is ___.', options: ['sad', 'glad', 'fast', 'old'], answer: 0, hint: 'A bad feeling.', explain: 'The opposite of happy is sad.' },
+      { category: 'Grammar', q: 'I have ___ dog.', options: ['an', 'a', 'the', 'two'], answer: 1, hint: 'Dog starts with a consonant sound.', explain: 'Use "a" before consonant sounds: a dog.' },
+      { category: 'Vocabulary', q: 'Which one is an animal?', options: ['Table', 'Rabbit', 'Window', 'Spoon'], answer: 1, hint: 'It hops and has long ears.', explain: 'A rabbit is an animal.' },
+    ],
+  },
+
+  // ---------- Tier 3: Grammar sentences ----------
+  {
+    name: 'Grammar Quest',
+    questions: [
+      { category: 'Verb Tense', q: 'Yesterday I ___ to the park.', options: ['go', 'goes', 'went', 'going'], answer: 2, hint: 'Past tense of "go".', explain: '"Went" is the past tense of "go".' },
+      { category: 'Prepositions', q: 'The cat is ___ the table.', options: ['on', 'in', 'at', 'of'], answer: 0, hint: 'Sitting on the surface.', explain: 'Use "on" for a surface: on the table.' },
+      { category: 'Articles', q: 'Can you pass me ___ salt, please?', options: ['a', 'an', 'the', '—'], answer: 2, hint: 'There is only one specific salt.', explain: 'Use "the" for a specific thing both people know.' },
+      { category: 'Verb Tense', q: 'She ___ a book right now.', options: ['read', 'reads', 'is reading', 'readed'], answer: 2, hint: '"Right now" = happening now.', explain: 'Present continuous for now: is reading.' },
+      { category: 'Prepositions', q: 'I was born ___ 2010.', options: ['on', 'at', 'in', 'by'], answer: 2, hint: 'Use with years.', explain: 'Use "in" with years: in 2010.' },
+      { category: 'Word Order', q: 'Choose the correct sentence.', options: ['She a teacher is.', 'Is she a teacher.', 'She is a teacher.', 'A teacher she is.'], answer: 2, hint: 'Subject + verb + rest.', explain: 'English order: subject (She) + verb (is) + rest.' },
+      { category: 'Verb Tense', q: 'They ___ football last week.', options: ['play', 'played', 'plays', 'playing'], answer: 1, hint: '"Last week" = past.', explain: 'Past tense: played football last week.' },
+      { category: 'Prepositions', q: 'The keys are ___ my bag.', options: ['on', 'in', 'at', 'over'], answer: 1, hint: 'Inside the bag.', explain: 'Use "in" for inside something: in my bag.' },
+      { category: 'Articles', q: 'I saw ___ elephant at the zoo.', options: ['a', 'an', 'the', 'some'], answer: 1, hint: 'Elephant starts with a vowel sound.', explain: 'Use "an" before vowel sounds: an elephant.' },
+      { category: 'Verb Tense', q: 'Look! It ___ outside.', options: ['rain', 'rains', 'is raining', 'rained'], answer: 2, hint: 'Happening right now.', explain: 'Present continuous: it is raining now.' },
+      { category: 'Word Order', q: 'Choose the correct question.', options: ['You like do pizza?', 'Do you like pizza?', 'Like you pizza do?', 'Pizza you do like?'], answer: 1, hint: 'Questions often start with "Do".', explain: 'Question form: Do + you + like + pizza?' },
+      { category: 'Prepositions', q: 'We meet ___ Monday.', options: ['in', 'at', 'on', 'by'], answer: 2, hint: 'Use with days of the week.', explain: 'Use "on" with days: on Monday.' },
+      { category: 'Verb Tense', q: 'I ___ my homework already.', options: ['finish', 'finished', 'have finished', 'finishing'], answer: 2, hint: '"Already" often uses present perfect.', explain: 'Present perfect with "already": have finished.' },
+      { category: 'Articles', q: '___ sun is very bright today.', options: ['A', 'An', 'The', 'Some'], answer: 2, hint: 'There is only one sun.', explain: 'Use "the" for unique things: The sun.' },
+      { category: 'Word Order', q: 'Choose the correct sentence.', options: ['I every morning run.', 'Run I every morning.', 'I run every morning.', 'Every I run morning.'], answer: 2, hint: 'Subject + verb + time.', explain: 'Correct: I (subject) run (verb) every morning (time).' },
+    ],
+  },
+];
+
+// Pick `count` unique random questions from a tier (clamped to tier size).
+function pickQuestions(tierIndex, count) {
+  const tier = TIERS[Math.min(tierIndex, TIERS.length - 1)];
+  const pool = [...tier.questions];
+  // Fisher–Yates shuffle
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return {
+    tierName: tier.name,
+    questions: pool.slice(0, Math.min(count, pool.length)),
+  };
+}
+
+// ===== js/world.js =====
+// Editable voxel world. Unlike a heightmap, every block lives in a 3D grid so
+// the player can MINE (remove) and BUILD (place) blocks. Rendering uses one
+// face-culled InstancedMesh per block type, rebuilt whenever the world changes.
+
+const WORLD_SIZE = 48;    // blocks along X and Z
+const WORLD_HEIGHT = 32;  // blocks along Y
+const WATER_LEVEL = 8;
+
+// Block ids.
+const B = {
+  AIR: 0, GRASS: 1, DIRT: 2, STONE: 3, SAND: 4, WOOD: 5, LEAVES: 6, QUESTION: 7,
+};
+// id -> texture/material name (for getBlockMaterials)
+const NAME = { 1: 'grass', 2: 'dirt', 3: 'stone', 4: 'sand', 5: 'wood', 6: 'leaves' };
+// Which ids the player can collect/place and a friendly label + hotbar colour.
+const BLOCK_INFO = {
+  [B.GRASS]:  { name: 'Grass',  color: '#6abe30' },
+  [B.DIRT]:   { name: 'Dirt',   color: '#8a5a2b' },
+  [B.STONE]:  { name: 'Stone',  color: '#7d7d7d' },
+  [B.SAND]:   { name: 'Sand',   color: '#e3d39b' },
+  [B.WOOD]:   { name: 'Wood',   color: '#6b4a25' },
+  [B.LEAVES]: { name: 'Leaves', color: '#3f8a2e' },
+};
+
+function makeRng(seed) {
+  let s = seed >>> 0;
+  return () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; };
+}
+function makeNoise(seed) {
+  const rng = makeRng(seed);
+  const G = 16;
+  const grid = [];
+  for (let i = 0; i < (G + 1) * (G + 1); i++) grid.push(rng());
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const smooth = (t) => t * t * (3 - 2 * t);
+  return (x, z) => {
+    const fx = (x / WORLD_SIZE) * G, fz = (z / WORLD_SIZE) * G;
+    const x0 = Math.floor(fx), z0 = Math.floor(fz);
+    const tx = smooth(fx - x0), tz = smooth(fz - z0);
+    const at = (gx, gz) => grid[(gz % (G + 1)) * (G + 1) + (gx % (G + 1))];
+    const top = lerp(at(x0, z0), at(x0 + 1, z0), tx);
+    const bot = lerp(at(x0, z0 + 1), at(x0 + 1, z0 + 1), tx);
+    return lerp(top, bot, tz);
+  };
+}
+
+class World {
+  constructor(seed = 1) {
+    this.seed = seed >>> 0;
+    this.voxels = new Uint8Array(WORLD_SIZE * WORLD_HEIGHT * WORLD_SIZE);
+    this.group = new THREE.Group();
+    this.blockGroup = new THREE.Group();
+    this.group.add(this.blockGroup);
+    this._generate();
+    this._addWater();
+  }
+
+  idx(x, y, z) { return (y * WORLD_SIZE + z) * WORLD_SIZE + x; }
+
+  inBounds(x, y, z) {
+    return x >= 0 && x < WORLD_SIZE && y >= 0 && y < WORLD_HEIGHT && z >= 0 && z < WORLD_SIZE;
+  }
+
+  // Raw get used for rendering/collision: below the world is solid stone,
+  // everything else out of bounds is air.
+  get(x, y, z) {
+    if (y < 0) return B.STONE;
+    if (!this.inBounds(x, y, z)) return B.AIR;
+    return this.voxels[this.idx(x, y, z)];
+  }
+  set(x, y, z, id) {
+    if (!this.inBounds(x, y, z)) return;
+    this.voxels[this.idx(x, y, z)] = id;
+  }
+
+  isSolid(id) { return id !== B.AIR; }
+  solidAt(wx, wy, wz) { return this.isSolid(this.get(Math.floor(wx), Math.floor(wy), Math.floor(wz))); }
+
+  // Top surface (first air) at a column — used for spawning/placement.
+  surfaceY(x, z) {
+    for (let y = WORLD_HEIGHT - 1; y >= 0; y--) {
+      if (this.isSolid(this.get(x, y, z))) return y + 1;
+    }
+    return 0;
+  }
+
+  _generate() {
+    const noiseA = makeNoise(this.seed);
+    const noiseB = makeNoise(this.seed ^ 0x9e3779b9);
+    const cx = WORLD_SIZE / 2, cz = WORLD_SIZE / 2, maxR = WORLD_SIZE / 2;
+    const treeRng = makeRng(this.seed ^ 0x1234abcd);
+
+    for (let z = 0; z < WORLD_SIZE; z++) {
+      for (let x = 0; x < WORLD_SIZE; x++) {
+        const n = noiseA(x, z) * 0.7 + noiseB(x * 2, z * 2) * 0.3;
+        const dx = (x - cx) / maxR, dz = (z - cz) / maxR;
+        const dist = Math.sqrt(dx * dx + dz * dz);
+        const fall = Math.max(0, 1 - dist * dist * 1.15);
+        let h = Math.round(WATER_LEVEL + 2 + n * 9 * fall - (1 - fall) * 7);
+        h = Math.max(2, Math.min(WORLD_HEIGHT - 6, h));
+        const sandy = h <= WATER_LEVEL + 1;
+
+        for (let y = 0; y < h; y++) {
+          let id;
+          if (y === h - 1) id = sandy ? B.SAND : B.GRASS;
+          else if (y >= h - 3) id = sandy ? B.SAND : B.DIRT;
+          else id = B.STONE;
+          this.set(x, y, z, id);
+        }
+        // trees on dry grass
+        if (!sandy && treeRng() < 0.03) this._tree(x, h, z, treeRng);
+      }
+    }
+  }
+
+  _tree(x, baseY, z, rng) {
+    const trunk = 3 + Math.floor(rng() * 2);
+    for (let i = 0; i < trunk; i++) this.set(x, baseY + i, z, B.WOOD);
+    const top = baseY + trunk;
+    for (let dx = -1; dx <= 1; dx++)
+      for (let dz = -1; dz <= 1; dz++) {
+        this.set(x + dx, top, z + dz, B.LEAVES);
+        if (Math.abs(dx) + Math.abs(dz) <= 1) this.set(x + dx, top + 1, z + dz, B.LEAVES);
+      }
+    this.set(x, top + 1, z, B.LEAVES);
+  }
+
+  // A solid block is drawn only if it has at least one air-facing side.
+  _exposed(x, y, z) {
+    return (
+      this.get(x + 1, y, z) === B.AIR || this.get(x - 1, y, z) === B.AIR ||
+      this.get(x, y + 1, z) === B.AIR || this.get(x, y - 1, z) === B.AIR ||
+      this.get(x, y, z + 1) === B.AIR || this.get(x, y, z - 1) === B.AIR
+    );
+  }
+
+  // (Re)build the instanced meshes from the current voxel data.
+  rebuild() {
+    // clear old meshes
+    for (let i = this.blockGroup.children.length - 1; i >= 0; i--) {
+      const m = this.blockGroup.children[i];
+      this.blockGroup.remove(m);
+      if (m.geometry) m.geometry.dispose();
+    }
+
+    const buckets = {}; // name -> [Matrix4]
+    const qMats = [];
+    const tmp = new THREE.Matrix4();
+    for (let y = 0; y < WORLD_HEIGHT; y++) {
+      for (let z = 0; z < WORLD_SIZE; z++) {
+        for (let x = 0; x < WORLD_SIZE; x++) {
+          const id = this.voxels[this.idx(x, y, z)];
+          if (id === B.AIR) continue;
+          if (!this._exposed(x, y, z)) continue;
+          tmp.makeTranslation(x + 0.5, y + 0.5, z + 0.5);
+          if (id === B.QUESTION) { qMats.push(tmp.clone()); continue; }
+          const name = NAME[id];
+          (buckets[name] ||= []).push(tmp.clone());
+        }
+      }
+    }
+
+    const geo = new THREE.BoxGeometry(1, 1, 1);
+    for (const [name, mats] of Object.entries(buckets)) {
+      const inst = new THREE.InstancedMesh(geo, getBlockMaterials(name), mats.length);
+      mats.forEach((mm, i) => inst.setMatrixAt(i, mm));
+      inst.instanceMatrix.needsUpdate = true;
+      this.blockGroup.add(inst);
+    }
+    if (qMats.length) {
+      const inst = new THREE.InstancedMesh(geo, getQuestionMaterials(), qMats.length);
+      qMats.forEach((mm, i) => inst.setMatrixAt(i, mm));
+      inst.instanceMatrix.needsUpdate = true;
+      this.blockGroup.add(inst);
+    }
+  }
+
+  _addWater() {
+    const geo = new THREE.PlaneGeometry(WORLD_SIZE + 8, WORLD_SIZE + 8);
+    geo.rotateX(-Math.PI / 2);
+    const mat = new THREE.MeshLambertMaterial({ color: 0x2f6fd8, transparent: true, opacity: 0.72 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(WORLD_SIZE / 2, WATER_LEVEL, WORLD_SIZE / 2);
+    this.group.add(mesh);
+  }
+
+  // Voxel ray traversal (Amanatides & Woo). Returns the first solid block hit
+  // plus the empty cell just before it (where a new block would be placed).
+  raycast(origin, dir, maxDist = 6, ignoreId = -1) {
+    let x = Math.floor(origin.x), y = Math.floor(origin.y), z = Math.floor(origin.z);
+    const stepX = Math.sign(dir.x), stepY = Math.sign(dir.y), stepZ = Math.sign(dir.z);
+    const tDeltaX = dir.x !== 0 ? Math.abs(1 / dir.x) : Infinity;
+    const tDeltaY = dir.y !== 0 ? Math.abs(1 / dir.y) : Infinity;
+    const tDeltaZ = dir.z !== 0 ? Math.abs(1 / dir.z) : Infinity;
+    const fb = (o, s) => s > 0 ? (Math.floor(o) + 1 - o) : (o - Math.floor(o));
+    let tMaxX = dir.x !== 0 ? fb(origin.x, stepX) * tDeltaX : Infinity;
+    let tMaxY = dir.y !== 0 ? fb(origin.y, stepY) * tDeltaY : Infinity;
+    let tMaxZ = dir.z !== 0 ? fb(origin.z, stepZ) * tDeltaZ : Infinity;
+
+    let px = x, py = y, pz = z;
+    let t = 0;
+    while (t <= maxDist) {
+      const id = this.get(x, y, z);
+      if (id !== B.AIR && id !== ignoreId) {
+        return { hit: { x, y, z, id }, prev: { x: px, y: py, z: pz } };
+      }
+      px = x; py = y; pz = z;
+      if (tMaxX < tMaxY && tMaxX < tMaxZ) { x += stepX; t = tMaxX; tMaxX += tDeltaX; }
+      else if (tMaxY < tMaxZ) { y += stepY; t = tMaxY; tMaxY += tDeltaY; }
+      else { z += stepZ; t = tMaxZ; tMaxZ += tDeltaZ; }
+    }
+    return null;
+  }
+
+  // Spread-out dry-land columns for placing objectives.
+  findObjectiveSpots(count, rng) {
+    const spots = [];
+    const cx = WORLD_SIZE / 2, cz = WORLD_SIZE / 2;
+    let attempts = 0;
+    while (spots.length < count && attempts < 4000) {
+      attempts++;
+      const x = 5 + Math.floor(rng() * (WORLD_SIZE - 10));
+      const z = 5 + Math.floor(rng() * (WORLD_SIZE - 10));
+      const sy = this.surfaceY(x, z);
+      if (sy <= WATER_LEVEL + 1) continue;
+      if (Math.hypot(x - cx, z - cz) < 7) continue;
+      if (spots.some((s) => Math.hypot(s.x - x, s.z - z) < 7)) continue;
+      spots.push({ x, z, y: sy });
+    }
+    return spots;
+  }
+
+  dispose() {
+    for (const m of this.blockGroup.children) if (m.geometry) m.geometry.dispose();
+  }
+}
+
+// ===== js/player.js =====
+// First-person player with voxel AABB collision: stands on blocks, can't walk
+// through them, falls into mined holes, and is blocked by blocks you build.
+// `pos` is the FEET position (bottom-centre of the player box).
+
+const EYE = 1.62;     // camera height above the feet
+const HALF = 0.3;     // half player width (x/z)
+const BODY = 1.8;     // player height
+const SPEED = 5.5;
+const GRAVITY = 24.0;
+const JUMP_VEL = 8.4;
+
+class Player {
+  constructor(camera, domElement) {
+    this.camera = camera;
+    this.dom = domElement;
+    this.world = null;
+
+    this.yaw = 0;
+    this.pitch = 0;
+    this.pos = new THREE.Vector3(WORLD_SIZE / 2, 20, WORLD_SIZE / 2);
+    this.vel = new THREE.Vector3();
+    this.onGround = false;
+    this.locked = false;
+
+    this.keys = {};
+    this._enabled = false;
+    this._dragging = false;
+
+    this._bindEvents();
+  }
+
+  setWorld(world) {
+    this.world = world;
+    const cx = WORLD_SIZE / 2, cz = WORLD_SIZE / 2;
+    this.pos.set(cx + 0.5, world.surfaceY(cx, cz) + 0.5, cz + 4.5);
+    this.vel.set(0, 0, 0);
+  }
+
+  setEnabled(v) { this._enabled = v; }
+  requestLock() { if (this.dom.requestPointerLock) this.dom.requestPointerLock(); }
+
+  // Camera forward direction (used for mining/placing raycasts).
+  forward() {
+    return new THREE.Vector3(
+      -Math.sin(this.yaw) * Math.cos(this.pitch),
+      Math.sin(this.pitch),
+      -Math.cos(this.yaw) * Math.cos(this.pitch)
+    ).normalize();
+  }
+  eyePosition() { return new THREE.Vector3(this.pos.x, this.pos.y + EYE, this.pos.z); }
+
+  _bindEvents() {
+    document.addEventListener('pointerlockchange', () => {
+      this.locked = document.pointerLockElement === this.dom;
+    });
+    this.dom.addEventListener('mousedown', () => { if (!this.locked) this._dragging = true; });
+    window.addEventListener('mouseup', () => { this._dragging = false; });
+    this.dom.addEventListener('mouseleave', () => { this._dragging = false; });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!this._enabled) return;
+      if (!this.locked && !this._dragging) return;
+      const s = 0.0024;
+      this.yaw -= e.movementX * s;
+      this.pitch -= e.movementY * s;
+      const lim = Math.PI / 2 - 0.05;
+      this.pitch = Math.max(-lim, Math.min(lim, this.pitch));
+    });
+
+    window.addEventListener('keydown', (e) => {
+      this.keys[e.code] = true;
+      if (this._enabled && ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) {
+        e.preventDefault();
+      }
+      if (e.code === 'Space' && this.onGround && this._enabled) {
+        this.vel.y = JUMP_VEL;
+        this.onGround = false;
+        Sfx.jump();
+      }
+    });
+    window.addEventListener('keyup', (e) => { this.keys[e.code] = false; });
+  }
+
+  // Does the player box at (px,py,pz feet) intersect any solid voxel?
+  _collides(px, py, pz) {
+    const w = this.world;
+    const x0 = Math.floor(px - HALF), x1 = Math.floor(px + HALF);
+    const y0 = Math.floor(py), y1 = Math.floor(py + BODY - 0.001);
+    const z0 = Math.floor(pz - HALF), z1 = Math.floor(pz + HALF);
+    for (let y = y0; y <= y1; y++)
+      for (let z = z0; z <= z1; z++)
+        for (let x = x0; x <= x1; x++)
+          if (w.isSolid(w.get(x, y, z))) return true;
+    return false;
+  }
+
+  update(dt) {
+    if (!this.world) return;
+    dt = Math.min(dt, 0.05);
+
+    // desired horizontal velocity
+    let vx = 0, vz = 0;
+    if (this._enabled) {
+      const fwd = (this.keys['KeyW'] ? 1 : 0) - (this.keys['KeyS'] ? 1 : 0);
+      const str = (this.keys['KeyD'] ? 1 : 0) - (this.keys['KeyA'] ? 1 : 0);
+      if (fwd || str) {
+        const sin = Math.sin(this.yaw), cos = Math.cos(this.yaw);
+        let dx = -sin * fwd + cos * str;
+        let dz = -cos * fwd - sin * str;
+        const len = Math.hypot(dx, dz) || 1;
+        vx = (dx / len) * SPEED;
+        vz = (dz / len) * SPEED;
+      }
+    }
+
+    // gravity
+    this.vel.y -= GRAVITY * dt;
+
+    // ---- move + resolve, axis by axis ----
+    // X
+    let nx = this.pos.x + vx * dt;
+    nx = Math.max(HALF, Math.min(WORLD_SIZE - HALF, nx));
+    if (!this._collides(nx, this.pos.y, this.pos.z)) this.pos.x = nx;
+    // Z
+    let nz = this.pos.z + vz * dt;
+    nz = Math.max(HALF, Math.min(WORLD_SIZE - HALF, nz));
+    if (!this._collides(this.pos.x, this.pos.y, nz)) this.pos.z = nz;
+    // Y
+    const ny = this.pos.y + this.vel.y * dt;
+    if (!this._collides(this.pos.x, ny, this.pos.z)) {
+      this.pos.y = ny;
+      this.onGround = false;
+    } else {
+      if (this.vel.y < 0) {                 // falling: land on the block below
+        this.pos.y = Math.floor(ny) + 1;     // rest feet on the block's top face
+        this.onGround = true;
+      }
+      // (moving up: bumped head — just stop vertical motion)
+      this.vel.y = 0;
+    }
+    if (this.pos.y < -20) this.setWorld(this.world); // safety: fell out
+
+    // ---- apply to camera ----
+    this.camera.position.set(this.pos.x, this.pos.y + EYE, this.pos.z);
+    const dir = this.forward();
+    this.camera.lookAt(this.camera.position.clone().add(dir));
+  }
+}
+
+// ===== js/objectives.js =====
+// Objectives: question blocks are now real voxels BURIED under a stone cap, so
+// the player must MINE down to uncover them. Each has a glowing beacon so it can
+// be found. Solving every question activates the central portal.
+
+class Objectives {
+  constructor(scene, world, questions, rng) {
+    this.scene = scene;
+    this.world = world;
+    this.group = new THREE.Group();
+    scene.add(this.group);
+
+    this.entries = [];
+    this.byKey = new Map();   // "x,y,z" -> entry
+    this.particles = [];
+    this.total = questions.length;
+    this.solvedCount = 0;
+    this.portalActive = false;
+    this.levelDone = false;
+
+    this._placeQuestions(questions, rng);
+    this._buildPortal();
+  }
+
+  key(x, y, z) { return `${x},${y},${z}`; }
+
+  _placeQuestions(questions, rng) {
+    const spots = this.world.findObjectiveSpots(questions.length, rng);
+    questions.forEach((q, i) => {
+      const s = spots[i];
+      if (!s) return;
+      const x = s.x, z = s.z;
+      // Bury the block ~3 blocks below the surface, inside solid ground, so the
+      // player must dig down to uncover it. A beacon marks the column.
+      const y = Math.max(1, s.y - 3);
+      this.world.set(x, y, z, B.QUESTION);
+
+      const beacon = this._beacon(x, y, z);
+      this.group.add(beacon);
+
+      const entry = { x, y, z, question: q, solved: false, beacon };
+      this.entries.push(entry);
+      this.byKey.set(this.key(x, y, z), entry);
+    });
+  }
+
+  // A tall translucent glowing column marking a buried question block.
+  _beacon(x, y, z) {
+    const h = WORLD_HEIGHT - y;
+    const geo = new THREE.BoxGeometry(0.35, h, 0.35);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xffd23f, transparent: true, opacity: 0.32 });
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(x + 0.5, y + h / 2, z + 0.5);
+    return m;
+  }
+
+  _buildPortal() {
+    this.portal = new THREE.Group();
+    const cx = Math.floor(WORLD_SIZE / 2), cz = Math.floor(WORLD_SIZE / 2);
+    const baseY = this.world.surfaceY(cx, cz);
+    const frameMat = new THREE.MeshLambertMaterial({ color: 0x2a2433 });
+    const frameGeo = new THREE.BoxGeometry(1, 1, 1);
+    for (const [dx, dy] of [[-1, 0], [1, 0], [-1, 1], [1, 1], [-1, 2], [1, 2], [-1, 3], [0, 3], [1, 3]]) {
+      const b = new THREE.Mesh(frameGeo, frameMat);
+      b.position.set(cx + dx + 0.5, baseY + dy + 0.5, cz + 0.5);
+      this.portal.add(b);
+    }
+    this.portalMat = new THREE.MeshBasicMaterial({ color: 0x333344, transparent: true, opacity: 0.85, side: THREE.DoubleSide });
+    this.portalSurface = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 3), this.portalMat);
+    this.portalSurface.position.set(cx + 0.5, baseY + 2, cz + 0.5);
+    this.portal.add(this.portalSurface);
+    this.portalPos = new THREE.Vector3(cx + 0.5, baseY + 1, cz + 0.5);
+    this.scene.add(this.portal);
+  }
+
+  getQuestionAt(x, y, z) { return this.byKey.get(this.key(x, y, z)) || null; }
+
+  // Solve a question block: clear it, drop the beacon, reward. Caller rebuilds.
+  solve(entry) {
+    if (entry.solved) return;
+    entry.solved = true;
+    this.solvedCount++;
+    this.world.set(entry.x, entry.y, entry.z, B.AIR);
+    this._shatter(entry.x + 0.5, entry.y + 0.5, entry.z + 0.5, 0xffd23f);
+    if (entry.beacon) { this.group.remove(entry.beacon); entry.beacon.geometry.dispose(); entry.beacon = null; }
+    if (this.solvedCount >= this.total) this._activatePortal();
+  }
+
+  _activatePortal() {
+    this.portalActive = true;
+    this.portalMat.color.set(0x9b59ff);
+    this.portalMat.opacity = 0.9;
+  }
+
+  getPortalNearby(p) {
+    if (!this.portalActive || this.levelDone) return false;
+    return Math.hypot(this.portalPos.x - p.x, this.portalPos.z - p.z) < 2.6;
+  }
+
+  _shatter(x, y, z, color) {
+    const geo = new THREE.BoxGeometry(0.16, 0.16, 0.16);
+    const mat = new THREE.MeshBasicMaterial({ color });
+    for (let i = 0; i < 14; i++) {
+      const p = new THREE.Mesh(geo, mat);
+      p.position.set(x, y, z);
+      const v = new THREE.Vector3((Math.random() - 0.5) * 4, Math.random() * 4 + 1, (Math.random() - 0.5) * 4);
+      this.scene.add(p);
+      this.particles.push({ mesh: p, v, life: 0.8 });
+    }
+  }
+
+  update(dt, t) {
+    // pulse beacons
+    for (const e of this.entries) {
+      if (e.solved || !e.beacon) continue;
+      e.beacon.material.opacity = 0.25 + Math.abs(Math.sin(t * 2)) * 0.2;
+    }
+    if (this.portalActive && this.portalSurface) {
+      this.portalSurface.material.opacity = 0.75 + Math.sin(t * 5) * 0.2;
+    }
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const p = this.particles[i];
+      p.life -= dt;
+      p.v.y -= 12 * dt;
+      p.mesh.position.addScaledVector(p.v, dt);
+      if (p.life <= 0) { this.scene.remove(p.mesh); p.mesh.geometry.dispose(); this.particles.splice(i, 1); }
+    }
+  }
+
+  dispose() {
+    this.scene.remove(this.group);
+    this.scene.remove(this.portal);
+    for (const p of this.particles) this.scene.remove(p.mesh);
+    this.particles = [];
+  }
+}
+
+// ===== js/viewmodel.js =====
+// First-person held "hand" (like the Minecraft arm). It lives in its own scene
+// rendered on top of the world, so it never clips into terrain. It bobs while
+// walking and swings when the player interacts/mines.
+
+// Pixel-y skin texture for the arm.
+function skinTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 16;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#c98e6d';
+  ctx.fillRect(0, 0, 16, 16);
+  // light speckle so it doesn't look flat
+  for (let i = 0; i < 40; i++) {
+    const x = Math.floor(Math.random() * 16), y = Math.floor(Math.random() * 16);
+    ctx.fillStyle = Math.random() < 0.5 ? '#bd8463' : '#d49a78';
+    ctx.fillRect(x, y, 1, 1);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.magFilter = THREE.NearestFilter;
+  t.minFilter = THREE.NearestFilter;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+const SWING_DURATION = 0.28; // seconds
+
+class ViewModel {
+  constructor() {
+    this.scene = new THREE.Scene();
+    this.camera = new THREE.PerspectiveCamera(70, 1, 0.01, 10);
+    this.camera.position.set(0, 0, 0);
+
+    // lighting so the Lambert arm is visible
+    this.scene.add(new THREE.HemisphereLight(0xffffff, 0x778899, 1.1));
+    const dir = new THREE.DirectionalLight(0xffffff, 0.5);
+    dir.position.set(0.5, 1, 1);
+    this.scene.add(dir);
+
+    // The arm: the group pivot is the elbow (down at the bottom-right, mostly
+    // off-screen). The skin forearm extends UP from the elbow so the fist sits
+    // near the screen centre; a small blue sleeve cuff sits below at the elbow.
+    this.arm = new THREE.Group();
+    const skin = new THREE.MeshLambertMaterial({ map: skinTexture() });
+    const forearm = new THREE.Mesh(new THREE.BoxGeometry(0.42, 1.4, 0.42), skin);
+    forearm.position.y = 0.62; // extends upward from the elbow pivot
+    this.arm.add(forearm);
+    const sleeve = new THREE.Mesh(
+      new THREE.BoxGeometry(0.48, 0.45, 0.48),
+      new THREE.MeshLambertMaterial({ color: 0x4a6fb0 })
+    );
+    sleeve.position.y = -0.08; // cuff at the elbow
+    this.arm.add(sleeve);
+
+    // Rest pose: elbow low-right (off-screen), forearm angles up-left toward
+    // the centre — the classic Minecraft first-person arm.
+    this.basePos = new THREE.Vector3(0.6, -0.95, -1.15);
+    this.baseRot = new THREE.Euler(-0.12, -0.2, 0.42);
+    this.arm.position.copy(this.basePos);
+    this.arm.rotation.copy(this.baseRot);
+    this.scene.add(this.arm);
+
+    this.bobPhase = 0;
+    this.swingT = -1; // <0 means not swinging
+  }
+
+  setSize(w, h) {
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+  }
+
+  swing() {
+    // restart the swing (allows rapid repeated swings)
+    this.swingT = 0;
+  }
+
+  update(dt, moving) {
+    // ---- walk bob ----
+    if (moving) this.bobPhase += dt * 9;
+    // ease the bob amplitude up/down so it doesn't pop
+    this._bobAmt = THREE.MathUtils.lerp(this._bobAmt ?? 0, moving ? 1 : 0, dt * 8);
+    const bobX = Math.cos(this.bobPhase) * 0.03 * this._bobAmt;
+    const bobY = Math.abs(Math.sin(this.bobPhase)) * 0.05 * this._bobAmt;
+    // gentle idle breathing
+    const idle = Math.sin(performance.now() * 0.0015) * 0.012;
+
+    this.arm.position.set(
+      this.basePos.x + bobX,
+      this.basePos.y + bobY + idle,
+      this.basePos.z
+    );
+    this.arm.rotation.copy(this.baseRot);
+
+    // ---- swing animation ----
+    if (this.swingT >= 0) {
+      this.swingT += dt;
+      const p = this.swingT / SWING_DURATION;
+      if (p >= 1) {
+        this.swingT = -1;
+      } else {
+        // quick punch: arm rotates forward and swings across, then returns
+        const s = Math.sin(p * Math.PI);
+        this.arm.rotation.x = this.baseRot.x - s * 0.85;
+        this.arm.rotation.z = this.baseRot.z + s * 0.35;
+        this.arm.position.x = this.basePos.x + bobX - s * 0.12;
+        this.arm.position.y = this.basePos.y + bobY + idle - s * 0.06;
+        this.arm.position.z = this.basePos.z + s * 0.15;
+      }
+    }
+  }
+
+  render(renderer) {
+    renderer.render(this.scene, this.camera);
+  }
+}
+
+// ===== js/quiz.js =====
+// Quiz overlay controller: renders a multiple-choice question, handles
+// answering (with retry + hint + explanation), and reports the outcome.
+
+class Quiz {
+  constructor() {
+    this.el = {
+      overlay: document.getElementById('quiz'),
+      category: document.getElementById('quiz-category'),
+      visual: document.getElementById('quiz-visual'),
+      question: document.getElementById('quiz-question'),
+      options: document.getElementById('quiz-options'),
+      feedback: document.getElementById('quiz-feedback'),
+      hint: document.getElementById('quiz-hint'),
+      continue: document.getElementById('quiz-continue'),
+      close: document.getElementById('quiz-close'),
+    };
+    this.active = false;
+    this.solved = false;
+    this.cb = {};
+
+    this.el.hint.addEventListener('click', () => this._showHint());
+    this.el.continue.addEventListener('click', () => this._finish());
+    this.el.close.addEventListener('click', () => this._abandon());
+  }
+
+  isOpen() { return this.active; }
+
+  // callbacks: { onCorrect, onWrong, onSolved, onAbandon }
+  open(question, callbacks) {
+    this.active = true;
+    this.solved = false;
+    this.question = question;
+    this.cb = callbacks || {};
+
+    this.el.category.textContent = question.category || 'Question';
+    this.el.visual.textContent = question.visual || '';
+    this.el.question.textContent = question.q;
+
+    // build option buttons
+    this.el.options.innerHTML = '';
+    question.options.forEach((text, i) => {
+      const b = document.createElement('button');
+      b.className = 'opt';
+      b.textContent = text;
+      b.addEventListener('click', () => this._answer(i, b));
+      this.el.options.appendChild(b);
+    });
+
+    this.el.feedback.className = 'quiz-feedback hidden';
+    this.el.feedback.textContent = '';
+    this.el.continue.classList.add('hidden');
+    this.el.hint.classList.toggle('hidden', !question.hint);
+    this.el.overlay.classList.remove('hidden');
+  }
+
+  _answer(i, btn) {
+    if (this.solved) return;
+    Sfx.click();
+    if (i === this.question.answer) {
+      this.solved = true;
+      btn.classList.add('correct');
+      this._disableOptions();
+      Sfx.correct();
+      this.el.feedback.className = 'quiz-feedback ok';
+      this.el.feedback.innerHTML =
+        `✅ <b>Correct!</b> ${this.question.explain || ''}`;
+      this.el.feedback.classList.remove('hidden');
+      this.el.hint.classList.add('hidden');
+      this.el.continue.classList.remove('hidden');
+      this.cb.onCorrect && this.cb.onCorrect();
+    } else {
+      // wrong: mark this option, let them try again (no penalty)
+      btn.classList.add('wrong');
+      btn.disabled = true;
+      Sfx.wrong();
+      this.el.feedback.className = 'quiz-feedback bad';
+      this.el.feedback.textContent = '❌ Not quite — try again!';
+      this.el.feedback.classList.remove('hidden');
+      this.cb.onWrong && this.cb.onWrong();
+    }
+  }
+
+  _showHint() {
+    if (!this.question.hint) return;
+    Sfx.click();
+    this.el.feedback.className = 'quiz-feedback';
+    this.el.feedback.style.background = 'rgba(255,210,63,0.12)';
+    this.el.feedback.style.border = '2px solid rgba(255,210,63,0.5)';
+    this.el.feedback.innerHTML = `💡 <b>Hint:</b> ${this.question.hint}`;
+    this.el.feedback.classList.remove('hidden');
+  }
+
+  _disableOptions() {
+    [...this.el.options.children].forEach((b) => {
+      b.disabled = true;
+      if (b.textContent === this.question.options[this.question.answer]) {
+        b.classList.add('correct');
+      }
+    });
+  }
+
+  _close() {
+    this.active = false;
+    this.el.overlay.classList.add('hidden');
+    // reset any inline styles set by hint
+    this.el.feedback.style.background = '';
+    this.el.feedback.style.border = '';
+  }
+
+  _finish() {
+    Sfx.click();
+    this._close();
+    this.cb.onSolved && this.cb.onSolved();
+  }
+
+  _abandon() {
+    Sfx.click();
+    const wasSolved = this.solved;
+    this._close();
+    if (wasSolved) {
+      this.cb.onSolved && this.cb.onSolved();
+    } else {
+      this.cb.onAbandon && this.cb.onAbandon();
+    }
+  }
+}
+
+// ===== js/main.js =====
+// WordCraft — entry point. Explore a voxel world, MINE down to buried question
+// blocks, answer English questions for keys, BUILD with what you mine, then open
+// the portal to advance.
+
+// ---- Renderer / scene ----
+const container = document.getElementById('game');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.autoClear = false; // we clear manually so the held hand can render on top
+container.appendChild(renderer.domElement);
+
+const viewModel = new ViewModel();
+viewModel.setSize(window.innerWidth, window.innerHeight);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x87ceeb);
+scene.fog = new THREE.Fog(0x87ceeb, 34, 80);
+
+const camera = new THREE.PerspectiveCamera(72, window.innerWidth / window.innerHeight, 0.1, 200);
+
+scene.add(new THREE.HemisphereLight(0xbfe3ff, 0x6a8a4a, 0.95));
+const sun = new THREE.DirectionalLight(0xfff4d6, 0.7);
+sun.position.set(30, 60, 20);
+scene.add(sun);
+
+// targeted-block highlight (wireframe cube)
+const highlight = new THREE.LineSegments(
+  new THREE.EdgesGeometry(new THREE.BoxGeometry(1.02, 1.02, 1.02)),
+  new THREE.LineBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.5 })
+);
+highlight.visible = false;
+scene.add(highlight);
+
+const player = new Player(camera, renderer.domElement);
+const quiz = new Quiz();
+
+// ---- Game state ----
+const HOTBAR = [B.GRASS, B.DIRT, B.STONE, B.SAND, B.WOOD, B.LEAVES];
+const state = {
+  level: 1, score: 0, streak: 0, bestStreak: 0,
+  keys: 0, keysTotal: 0, playing: false,
+  inv: {}, selected: 2, // start on Stone
+};
+
+let world = null;
+let objectives = null;
+let target = null;          // { hit:{x,y,z,id}, prev:{x,y,z} } | null
+let targetEntry = null;     // question entry under the crosshair | null
+
+// ---- DOM ----
+const el = {
+  start: document.getElementById('start'),
+  hud: document.getElementById('hud'),
+  crosshair: document.getElementById('crosshair'),
+  prompt: document.getElementById('prompt'),
+  toast: document.getElementById('toast'),
+  loading: document.getElementById('loading'),
+  levelend: document.getElementById('levelend'),
+  hotbar: document.getElementById('hotbar'),
+  hudLevel: document.getElementById('hud-level'),
+  hudKeys: document.getElementById('hud-keys'),
+  hudKeysTotal: document.getElementById('hud-keys-total'),
+  hudScore: document.getElementById('hud-score'),
+  hudStreak: document.getElementById('hud-streak'),
+  hudTier: document.getElementById('hud-tier'),
+};
+
+let toastTimer = null;
+function toast(msg, ms = 1800) {
+  el.toast.textContent = msg;
+  el.toast.classList.remove('hidden');
+  el.toast.style.animation = 'none';
+  void el.toast.offsetWidth;
+  el.toast.style.animation = '';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.toast.classList.add('hidden'), ms);
+}
+
+function updateHud() {
+  el.hudLevel.textContent = state.level;
+  el.hudKeys.textContent = state.keys;
+  el.hudKeysTotal.textContent = state.keysTotal;
+  el.hudScore.textContent = state.score;
+  el.hudStreak.textContent = state.streak;
+}
+
+// ---- Hotbar / inventory ----
+function renderHotbar() {
+  el.hotbar.innerHTML = '';
+  HOTBAR.forEach((id, i) => {
+    const info = BLOCK_INFO[id];
+    const slot = document.createElement('div');
+    slot.className = 'slot' + (i === state.selected ? ' sel' : '');
+    slot.innerHTML =
+      `<span class="swatch" style="background:${info.color}"></span>` +
+      `<span class="count">${state.inv[id] || 0}</span>` +
+      `<span class="num">${i + 1}</span>`;
+    slot.title = info.name;
+    slot.addEventListener('click', () => { state.selected = i; renderHotbar(); });
+    el.hotbar.appendChild(slot);
+  });
+}
+
+// ---- Level building ----
+function tierForLevel(level) { return Math.min(level - 1, TIERS.length - 1); }
+
+function buildLevel(level) {
+  el.loading.classList.remove('hidden');
+  if (objectives) objectives.dispose();
+  if (world) { scene.remove(world.group); world.dispose(); }
+
+  const seed = (level * 92821 + 7) >>> 0;
+  world = new World(seed);                  // generates voxels
+  scene.add(world.group);
+
+  const tierIdx = tierForLevel(level);
+  const count = Math.min(3 + level, 6);
+  const { tierName, questions } = pickQuestions(tierIdx, count);
+
+  const rng = (() => { let s = seed ^ 0x55aa; return () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; }; })();
+  objectives = new Objectives(scene, world, questions, rng); // edits voxels
+  world.rebuild();                          // build meshes from final voxels
+
+  player.setWorld(world);
+
+  state.keys = 0;
+  state.keysTotal = objectives.total;
+  // starter blocks so you can build right away (plus whatever you mine)
+  state.inv = { [B.GRASS]: 0, [B.DIRT]: 0, [B.STONE]: 20, [B.SAND]: 0, [B.WOOD]: 10, [B.LEAVES]: 0 };
+  renderHotbar();
+  el.hudTier.textContent = `📚 ${tierName} — dig to ${objectives.total} glowing beacons`;
+  updateHud();
+  setTimeout(() => el.loading.classList.add('hidden'), 150);
+}
+
+// ---- Mining / building ----
+function mine() {
+  if (!target) return;
+  const { x, y, z, id } = target.hit;
+  if (id === B.QUESTION) { openQuiz(); return; }
+  // collect the block if it's a placeable type
+  if (BLOCK_INFO[id]) state.inv[id] = (state.inv[id] || 0) + 1;
+  world.set(x, y, z, B.AIR);
+  world.rebuild();
+  renderHotbar();
+}
+
+function build() {
+  if (!target) return;
+  const id = HOTBAR[state.selected];
+  if ((state.inv[id] || 0) <= 0) { toast(`No ${BLOCK_INFO[id].name} left to place`); return; }
+  const { x, y, z } = target.prev;
+  if (world.get(x, y, z) !== B.AIR) return;
+  if (overlapsPlayer(x, y, z)) return;       // don't trap the player
+  world.set(x, y, z, id);
+  state.inv[id]--;
+  world.rebuild();
+  renderHotbar();
+}
+
+function overlapsPlayer(x, y, z) {
+  const p = player.pos, HALF = 0.3, BODY = 1.8;
+  return x >= Math.floor(p.x - HALF) && x <= Math.floor(p.x + HALF) &&
+         y >= Math.floor(p.y) && y <= Math.floor(p.y + BODY - 0.001) &&
+         z >= Math.floor(p.z - HALF) && z <= Math.floor(p.z + HALF);
+}
+
+// ---- Quiz ----
+function openQuiz() {
+  if (!targetEntry || quiz.isOpen()) return;
+  const entry = targetEntry;
+  releaseControl();
+  quiz.open(entry.question, {
+    onCorrect: () => {
+      state.score += 10 + state.streak * 5;
+      state.streak++;
+      state.bestStreak = Math.max(state.bestStreak, state.streak);
+      updateHud();
+    },
+    onWrong: () => { state.streak = 0; updateHud(); },
+    onSolved: () => {
+      objectives.solve(entry);
+      world.rebuild();
+      state.keys++;
+      Sfx.collect();
+      updateHud();
+      if (objectives.solvedCount >= objectives.total) {
+        toast('🌟 Portal unlocked! Head to the center!', 2600);
+        Sfx.portal();
+      } else {
+        toast(`🔑 Key collected! ${state.keys}/${state.keysTotal}`);
+      }
+      resumeControl();
+    },
+    onAbandon: () => resumeControl(),
+  });
+}
+
+function releaseControl() { player.setEnabled(false); if (document.exitPointerLock) document.exitPointerLock(); }
+function resumeControl() { if (!state.playing) return; player.setEnabled(true); player.requestLock(); }
+
+function completeLevel() {
+  if (!objectives || objectives.levelDone) return;
+  objectives.levelDone = true;
+  state.playing = false;
+  releaseControl();
+  Sfx.portal();
+  el.levelend.querySelector('#levelend-title').innerHTML = `LEVEL ${state.level} <span>COMPLETE!</span>`;
+  el.levelend.querySelector('#levelend-msg').textContent = 'You opened the portal! Ready for harder English?';
+  el.levelend.querySelector('#levelend-stats').innerHTML =
+    `<div>⭐ Score: <b>${state.score}</b></div>
+     <div>🔥 Best streak: <b>${state.bestStreak}</b></div>
+     <div>🔑 Questions solved: <b>${state.keysTotal}</b></div>`;
+  el.levelend.classList.remove('hidden');
+}
+
+// ---- Start / next ----
+function startGame() {
+  Sfx.unlock();
+  el.start.classList.add('hidden');
+  el.hud.classList.remove('hidden');
+  el.crosshair.classList.remove('hidden');
+  el.hotbar.classList.remove('hidden');
+  state.level = 1; state.score = 0; state.streak = 0; state.bestStreak = 0;
+  buildLevel(state.level);
+  state.playing = true;
+  player.setEnabled(true);
+  player.requestLock();
+  toast('⛏️ Left-click to mine • right-click to build • dig to the beacons!', 3600);
+}
+
+function nextLevel() {
+  el.levelend.classList.add('hidden');
+  state.level++;
+  buildLevel(state.level);
+  state.playing = true;
+  player.setEnabled(true);
+  player.requestLock();
+}
+
+document.getElementById('btn-play').addEventListener('click', startGame);
+document.getElementById('btn-next').addEventListener('click', nextLevel);
+
+// ---- Input ----
+window.addEventListener('keydown', (e) => {
+  if (!state.playing) return;
+  if (e.code === 'KeyE') {
+    if (objectives.getPortalNearby(player.pos)) completeLevel();
+    else if (targetEntry && !quiz.isOpen()) { viewModel.swing(); openQuiz(); }
+  }
+  // hotbar select 1..6
+  const n = parseInt(e.key, 10);
+  if (n >= 1 && n <= HOTBAR.length) { state.selected = n - 1; renderHotbar(); }
+});
+
+window.addEventListener('wheel', (e) => {
+  if (!state.playing || quiz.isOpen()) return;
+  state.selected = (state.selected + (e.deltaY > 0 ? 1 : -1) + HOTBAR.length) % HOTBAR.length;
+  renderHotbar();
+}, { passive: true });
+
+renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+
+renderer.domElement.addEventListener('mousedown', (e) => {
+  if (!state.playing || quiz.isOpen()) return;
+  if (!player.locked) { player.requestLock(); return; }
+  viewModel.swing();
+  if (e.button === 0) mine();        // left click
+  else if (e.button === 2) build();  // right click
+});
+
+// ---- Resize ----
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  viewModel.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ---- Game loop ----
+const clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = clock.getDelta();
+  const t = clock.getElapsedTime();
+
+  player.update(dt);
+
+  const k = player.keys;
+  const moving = state.playing && player.onGround && (k['KeyW'] || k['KeyA'] || k['KeyS'] || k['KeyD']);
+  viewModel.update(dt, !!moving);
+
+  if (objectives && state.playing) {
+    objectives.update(dt, t);
+
+    // what block is under the crosshair?
+    target = quiz.isOpen() ? null : world.raycast(player.eyePosition(), player.forward(), 6);
+    targetEntry = (target && target.hit.id === B.QUESTION)
+      ? objectives.getQuestionAt(target.hit.x, target.hit.y, target.hit.z) : null;
+
+    if (target) {
+      highlight.position.set(target.hit.x + 0.5, target.hit.y + 0.5, target.hit.z + 0.5);
+      highlight.visible = true;
+    } else highlight.visible = false;
+
+    // prompt
+    if (targetEntry) {
+      el.prompt.innerHTML = 'Click the glowing block (or <kbd>E</kbd>) to answer!';
+      el.prompt.classList.remove('hidden');
+    } else if (objectives.getPortalNearby(player.pos)) {
+      el.prompt.innerHTML = 'Press <kbd>E</kbd> to enter the portal';
+      el.prompt.classList.remove('hidden');
+    } else {
+      el.prompt.classList.add('hidden');
+    }
+  } else {
+    highlight.visible = false;
+    el.prompt.classList.add('hidden');
+  }
+
+  renderer.clear();
+  renderer.render(scene, camera);
+  renderer.clearDepth();
+  if (state.playing) viewModel.render(renderer);
+}
+animate();
+
+// Debug handle.
+window.WordCraft = {
+  state,
+  get world() { return world; },
+  get objectives() { return objectives; },
+  player, quiz, scene, viewModel,
+  get target() { return target; },
+  get targetEntry() { return targetEntry; },
+  mine, build,
+  digToFirstQuestion() {
+    const e = objectives && objectives.entries.find((x) => !x.solved);
+    if (!e) return false;
+    // clear the column above the buried block and stand the player there
+    for (let y = e.y + 1; y < world.surfaceY(e.x, e.z) + 1; y++) world.set(e.x, y, e.z, B.AIR);
+    world.rebuild();
+    player.pos.set(e.x + 0.5, e.y + 1.5, e.z + 0.5);
+    player.vel.set(0, 0, 0);
+    return true;
+  },
+};
+  </script>
+
+  <!-- Fallback notice if the 3D engine fails to load (e.g. no internet on first run). -->
+  <script>
+    setTimeout(function () {
+      if (!window.WordCraft) {
+        var h = document.querySelector('#start .hint-text');
+        if (h) {
+          h.innerHTML = '⚠️ Could not load the 3D engine (Three.js). Please connect to the ' +
+            'internet for the first run (it is fetched from a CDN), then reload this page.';
+          h.style.color = '#ffd23f';
+        }
+      }
+    }, 5000);
+  </script>
+</body>
+</html>
