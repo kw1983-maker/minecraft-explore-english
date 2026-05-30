@@ -7,7 +7,7 @@ import { Player } from './player.js';
 import { Objectives } from './objectives.js';
 import { Quiz } from './quiz.js';
 import { pickQuestions, TIERS } from './questions.js';
-import { Sfx } from './audio.js';
+import { Sfx, Music } from './audio.js';
 import { ViewModel } from './viewmodel.js';
 
 // ---- Renderer / scene ----
@@ -226,6 +226,7 @@ function completeLevel() {
 // ---- Start / next ----
 function startGame() {
   Sfx.unlock();
+  Music.start();
   el.start.classList.add('hidden');
   el.hud.classList.remove('hidden');
   el.crosshair.classList.remove('hidden');
@@ -249,6 +250,17 @@ function nextLevel() {
 
 document.getElementById('btn-play').addEventListener('click', startGame);
 document.getElementById('btn-next').addEventListener('click', nextLevel);
+
+// ---- Music toggle (button + M key) ----
+const musicBtn = document.getElementById('music-toggle');
+function refreshMusicBtn() {
+  musicBtn.textContent = Music.enabled ? '🎵' : '🔇';
+  musicBtn.classList.toggle('off', !Music.enabled);
+}
+musicBtn.addEventListener('click', () => { Music.toggle(); refreshMusicBtn(); });
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'KeyM') { Music.toggle(); refreshMusicBtn(); }
+});
 
 // ---- Input ----
 window.addEventListener('keydown', (e) => {
