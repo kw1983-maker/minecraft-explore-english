@@ -47,7 +47,12 @@ python -m http.server 8000   # then open http://localhost:8000
 | **Right-click** | 🧱 Place the selected block |
 | **1 – 6 / scroll** | Pick which block to build with |
 | **E** | Answer an uncovered question block / enter the portal |
+| **M** / 🎵 button | Toggle background music on/off |
 | **Esc** | Release the mouse |
+
+> 🎵 Soft, calming ambient music plays in the background (original, synthesized
+> live in the browser — no audio files). Toggle it with **M** or the music button
+> in the top-left.
 
 ## 🎯 How to play
 
