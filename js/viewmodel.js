@@ -52,6 +52,22 @@ export class ViewModel {
     sleeve.position.y = -0.08; // cuff at the elbow
     this.arm.add(sleeve);
 
+    // Held pickaxe — gripped by the fist (top of the forearm) and swings with it.
+    this.tool = new THREE.Group();
+    const handle = new THREE.Mesh(
+      new THREE.BoxGeometry(0.12, 1.0, 0.12),
+      new THREE.MeshLambertMaterial({ color: 0x5c3f1f })
+    );
+    this.tool.add(handle);
+    this._headMat = new THREE.MeshLambertMaterial({ color: 0x8d8d8d });
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.16, 0.16), this._headMat);
+    head.position.y = 0.5; // crossbar near the top of the handle
+    this.tool.add(head);
+    this.tool.position.set(0.02, 1.2, 0.16);
+    this.tool.rotation.set(0.55, 0.0, 0.25);
+    this.arm.add(this.tool);
+    this.setTier(1);
+
     // Rest pose: elbow low-right (off-screen), forearm angles up-left toward
     // the centre — the classic Minecraft first-person arm.
     this.basePos = new THREE.Vector3(0.6, -0.95, -1.15);
@@ -72,6 +88,13 @@ export class ViewModel {
   swing() {
     // restart the swing (allows rapid repeated swings)
     this.swingT = 0;
+  }
+
+  // Pickaxe tier: 1 = wood, 2 = stone, 3 = iron (just changes the head colour).
+  setTier(tier) {
+    const colors = { 1: 0x8a6a3a, 2: 0x8d8d8d, 3: 0xcfd6e0 };
+    this._tier = tier;
+    if (this._headMat) this._headMat.color.setHex(colors[Math.min(tier, 3)] || 0x8d8d8d);
   }
 
   update(dt, moving) {

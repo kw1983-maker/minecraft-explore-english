@@ -138,9 +138,55 @@ export function getBlockMaterials(type) {
     case 'leaves':
       mats = blockMaterials({ top: BlockTex.leaves(), side: BlockTex.leaves() });
       break;
+    // ---- special reward blocks: solid, glowing colours ----
+    case 'glow':
+      mats = solidGlow(0xffd23f, 0xffaa00, 0.75);
+      break;
+    case 'ruby':
+      mats = solidGlow(0xe0444f, 0xaa1822, 0.55);
+      break;
+    case 'sapphire':
+      mats = solidGlow(0x4a6fe0, 0x1828aa, 0.55);
+      break;
     default:
       mats = blockMaterials({ top: BlockTex.dirt(), side: BlockTex.dirt() });
   }
   matCache[type] = mats;
   return mats;
+}
+
+// A solid emissive material set (used for the glowing reward blocks).
+function solidGlow(color, emissive, intensity) {
+  const m = new THREE.MeshLambertMaterial({ color, emissive, emissiveIntensity: intensity });
+  return [m, m, m, m, m, m];
+}
+
+// Crack-overlay textures for the hold-to-mine effect (stages 0..9). Transparent
+// background so only the crack lines show on top of the block being mined.
+const _crack = {};
+export function getCrackTexture(stage) {
+  if (_crack[stage]) return _crack[stage];
+  const c = document.createElement('canvas');
+  c.width = c.height = 16;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, 16, 16);
+  ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+  ctx.lineWidth = 1;
+  const rng = mulberry32(1234);
+  const lines = 1 + stage;            // more cracks as it breaks
+  for (let i = 0; i < lines; i++) {
+    let x = 8, y = 8;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    const steps = 2 + stage;
+    for (let s = 0; s < steps; s++) {
+      x = Math.max(0, Math.min(16, x + Math.floor((rng() - 0.5) * 7)));
+      y = Math.max(0, Math.min(16, y + Math.floor((rng() - 0.5) * 7)));
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  const t = texFromCanvas(c);
+  _crack[stage] = t;
+  return t;
 }

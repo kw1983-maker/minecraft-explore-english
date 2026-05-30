@@ -11,18 +11,34 @@ export const WATER_LEVEL = 8;
 // Block ids.
 export const B = {
   AIR: 0, GRASS: 1, DIRT: 2, STONE: 3, SAND: 4, WOOD: 5, LEAVES: 6, QUESTION: 7,
+  // special reward blocks (unlocked by answering questions correctly)
+  GLOW: 8, RUBY: 9, SAPPHIRE: 10,
 };
 // id -> texture/material name (for getBlockMaterials)
-const NAME = { 1: 'grass', 2: 'dirt', 3: 'stone', 4: 'sand', 5: 'wood', 6: 'leaves' };
+const NAME = {
+  1: 'grass', 2: 'dirt', 3: 'stone', 4: 'sand', 5: 'wood', 6: 'leaves',
+  8: 'glow', 9: 'ruby', 10: 'sapphire',
+};
 // Which ids the player can collect/place and a friendly label + hotbar colour.
 export const BLOCK_INFO = {
-  [B.GRASS]:  { name: 'Grass',  color: '#6abe30' },
-  [B.DIRT]:   { name: 'Dirt',   color: '#8a5a2b' },
-  [B.STONE]:  { name: 'Stone',  color: '#7d7d7d' },
-  [B.SAND]:   { name: 'Sand',   color: '#e3d39b' },
-  [B.WOOD]:   { name: 'Wood',   color: '#6b4a25' },
-  [B.LEAVES]: { name: 'Leaves', color: '#3f8a2e' },
+  [B.GRASS]:    { name: 'Grass',    color: '#6abe30' },
+  [B.DIRT]:     { name: 'Dirt',     color: '#8a5a2b' },
+  [B.STONE]:    { name: 'Stone',    color: '#7d7d7d' },
+  [B.SAND]:     { name: 'Sand',     color: '#e3d39b' },
+  [B.WOOD]:     { name: 'Wood',     color: '#6b4a25' },
+  [B.LEAVES]:   { name: 'Leaves',   color: '#3f8a2e' },
+  [B.GLOW]:     { name: 'Glowstone', color: '#ffd23f', reward: true },
+  [B.RUBY]:     { name: 'Ruby',      color: '#e0444f', reward: true },
+  [B.SAPPHIRE]: { name: 'Sapphire',  color: '#4a6fe0', reward: true },
 };
+
+// How long each block takes to break (seconds with the base pickaxe).
+const HARDNESS = {
+  [B.GRASS]: 0.45, [B.DIRT]: 0.45, [B.SAND]: 0.35, [B.LEAVES]: 0.25,
+  [B.WOOD]: 0.9, [B.STONE]: 1.5,
+  [B.GLOW]: 1.1, [B.RUBY]: 1.3, [B.SAPPHIRE]: 1.3,
+};
+export function hardness(id) { return HARDNESS[id] ?? 0.6; }
 
 function makeRng(seed) {
   let s = seed >>> 0;

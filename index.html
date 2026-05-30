@@ -569,11 +569,57 @@ function getBlockMaterials(type) {
     case 'leaves':
       mats = blockMaterials({ top: BlockTex.leaves(), side: BlockTex.leaves() });
       break;
+    // ---- special reward blocks: solid, glowing colours ----
+    case 'glow':
+      mats = solidGlow(0xffd23f, 0xffaa00, 0.75);
+      break;
+    case 'ruby':
+      mats = solidGlow(0xe0444f, 0xaa1822, 0.55);
+      break;
+    case 'sapphire':
+      mats = solidGlow(0x4a6fe0, 0x1828aa, 0.55);
+      break;
     default:
       mats = blockMaterials({ top: BlockTex.dirt(), side: BlockTex.dirt() });
   }
   matCache[type] = mats;
   return mats;
+}
+
+// A solid emissive material set (used for the glowing reward blocks).
+function solidGlow(color, emissive, intensity) {
+  const m = new THREE.MeshLambertMaterial({ color, emissive, emissiveIntensity: intensity });
+  return [m, m, m, m, m, m];
+}
+
+// Crack-overlay textures for the hold-to-mine effect (stages 0..9). Transparent
+// background so only the crack lines show on top of the block being mined.
+const _crack = {};
+function getCrackTexture(stage) {
+  if (_crack[stage]) return _crack[stage];
+  const c = document.createElement('canvas');
+  c.width = c.height = 16;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, 16, 16);
+  ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+  ctx.lineWidth = 1;
+  const rng = mulberry32(1234);
+  const lines = 1 + stage;            // more cracks as it breaks
+  for (let i = 0; i < lines; i++) {
+    let x = 8, y = 8;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    const steps = 2 + stage;
+    for (let s = 0; s < steps; s++) {
+      x = Math.max(0, Math.min(16, x + Math.floor((rng() - 0.5) * 7)));
+      y = Math.max(0, Math.min(16, y + Math.floor((rng() - 0.5) * 7)));
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  const t = texFromCanvas(c);
+  _crack[stage] = t;
+  return t;
 }
 
 // ===== js/audio.js =====
@@ -635,6 +681,15 @@ const Sfx = {
   },
   click() {
     tone(600, 0, 0.05, 'square', 0.08);
+  },
+  // soft "tok" while digging
+  mine() {
+    tone(180 + Math.random() * 40, 0, 0.06, 'triangle', 0.07);
+  },
+  // crunchy "crack" when a block breaks
+  breakBlock() {
+    tone(140, 0, 0.1, 'sawtooth', 0.12);
+    tone(90, 0.04, 0.14, 'square', 0.1);
   },
 };
 
@@ -854,18 +909,34 @@ const WATER_LEVEL = 8;
 // Block ids.
 const B = {
   AIR: 0, GRASS: 1, DIRT: 2, STONE: 3, SAND: 4, WOOD: 5, LEAVES: 6, QUESTION: 7,
+  // special reward blocks (unlocked by answering questions correctly)
+  GLOW: 8, RUBY: 9, SAPPHIRE: 10,
 };
 // id -> texture/material name (for getBlockMaterials)
-const NAME = { 1: 'grass', 2: 'dirt', 3: 'stone', 4: 'sand', 5: 'wood', 6: 'leaves' };
+const NAME = {
+  1: 'grass', 2: 'dirt', 3: 'stone', 4: 'sand', 5: 'wood', 6: 'leaves',
+  8: 'glow', 9: 'ruby', 10: 'sapphire',
+};
 // Which ids the player can collect/place and a friendly label + hotbar colour.
 const BLOCK_INFO = {
-  [B.GRASS]:  { name: 'Grass',  color: '#6abe30' },
-  [B.DIRT]:   { name: 'Dirt',   color: '#8a5a2b' },
-  [B.STONE]:  { name: 'Stone',  color: '#7d7d7d' },
-  [B.SAND]:   { name: 'Sand',   color: '#e3d39b' },
-  [B.WOOD]:   { name: 'Wood',   color: '#6b4a25' },
-  [B.LEAVES]: { name: 'Leaves', color: '#3f8a2e' },
+  [B.GRASS]:    { name: 'Grass',    color: '#6abe30' },
+  [B.DIRT]:     { name: 'Dirt',     color: '#8a5a2b' },
+  [B.STONE]:    { name: 'Stone',    color: '#7d7d7d' },
+  [B.SAND]:     { name: 'Sand',     color: '#e3d39b' },
+  [B.WOOD]:     { name: 'Wood',     color: '#6b4a25' },
+  [B.LEAVES]:   { name: 'Leaves',   color: '#3f8a2e' },
+  [B.GLOW]:     { name: 'Glowstone', color: '#ffd23f', reward: true },
+  [B.RUBY]:     { name: 'Ruby',      color: '#e0444f', reward: true },
+  [B.SAPPHIRE]: { name: 'Sapphire',  color: '#4a6fe0', reward: true },
 };
+
+// How long each block takes to break (seconds with the base pickaxe).
+const HARDNESS = {
+  [B.GRASS]: 0.45, [B.DIRT]: 0.45, [B.SAND]: 0.35, [B.LEAVES]: 0.25,
+  [B.WOOD]: 0.9, [B.STONE]: 1.5,
+  [B.GLOW]: 1.1, [B.RUBY]: 1.3, [B.SAPPHIRE]: 1.3,
+};
+function hardness(id) { return HARDNESS[id] ?? 0.6; }
 
 function makeRng(seed) {
   let s = seed >>> 0;
@@ -1199,15 +1270,27 @@ class Player {
     // gravity
     this.vel.y -= GRAVITY * dt;
 
-    // ---- move + resolve, axis by axis ----
+    // ---- move + resolve, axis by axis (with auto step-up over 1-block ledges) ----
     // X
     let nx = this.pos.x + vx * dt;
     nx = Math.max(HALF, Math.min(WORLD_SIZE - HALF, nx));
     if (!this._collides(nx, this.pos.y, this.pos.z)) this.pos.x = nx;
+    else if (vx !== 0 && this.onGround) {
+      const sy = Math.floor(this.pos.y) + 1;                 // top of the ledge
+      if (sy - this.pos.y <= 1.01 && !this._collides(nx, sy, this.pos.z)) {
+        this.pos.x = nx; this.pos.y = sy;                    // step up
+      }
+    }
     // Z
     let nz = this.pos.z + vz * dt;
     nz = Math.max(HALF, Math.min(WORLD_SIZE - HALF, nz));
     if (!this._collides(this.pos.x, this.pos.y, nz)) this.pos.z = nz;
+    else if (vz !== 0 && this.onGround) {
+      const sy = Math.floor(this.pos.y) + 1;
+      if (sy - this.pos.y <= 1.01 && !this._collides(this.pos.x, sy, nz)) {
+        this.pos.z = nz; this.pos.y = sy;
+      }
+    }
     // Y
     const ny = this.pos.y + this.vel.y * dt;
     if (!this._collides(this.pos.x, ny, this.pos.z)) {
@@ -1421,6 +1504,22 @@ class ViewModel {
     sleeve.position.y = -0.08; // cuff at the elbow
     this.arm.add(sleeve);
 
+    // Held pickaxe — gripped by the fist (top of the forearm) and swings with it.
+    this.tool = new THREE.Group();
+    const handle = new THREE.Mesh(
+      new THREE.BoxGeometry(0.12, 1.0, 0.12),
+      new THREE.MeshLambertMaterial({ color: 0x5c3f1f })
+    );
+    this.tool.add(handle);
+    this._headMat = new THREE.MeshLambertMaterial({ color: 0x8d8d8d });
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.16, 0.16), this._headMat);
+    head.position.y = 0.5; // crossbar near the top of the handle
+    this.tool.add(head);
+    this.tool.position.set(0.02, 1.2, 0.16);
+    this.tool.rotation.set(0.55, 0.0, 0.25);
+    this.arm.add(this.tool);
+    this.setTier(1);
+
     // Rest pose: elbow low-right (off-screen), forearm angles up-left toward
     // the centre — the classic Minecraft first-person arm.
     this.basePos = new THREE.Vector3(0.6, -0.95, -1.15);
@@ -1441,6 +1540,13 @@ class ViewModel {
   swing() {
     // restart the swing (allows rapid repeated swings)
     this.swingT = 0;
+  }
+
+  // Pickaxe tier: 1 = wood, 2 = stone, 3 = iron (just changes the head colour).
+  setTier(tier) {
+    const colors = { 1: 0x8a6a3a, 2: 0x8d8d8d, 3: 0xcfd6e0 };
+    this._tier = tier;
+    if (this._headMat) this._headMat.color.setHex(colors[Math.min(tier, 3)] || 0x8d8d8d);
   }
 
   update(dt, moving) {
@@ -1650,17 +1756,53 @@ const player = new Player(camera, renderer.domElement);
 const quiz = new Quiz();
 
 // ---- Game state ----
-const HOTBAR = [B.GRASS, B.DIRT, B.STONE, B.SAND, B.WOOD, B.LEAVES];
+const HOTBAR = [B.GRASS, B.DIRT, B.STONE, B.SAND, B.WOOD, B.LEAVES, B.GLOW, B.RUBY, B.SAPPHIRE];
+const REWARD_BLOCKS = [B.GLOW, B.RUBY, B.SAPPHIRE];
 const state = {
   level: 1, score: 0, streak: 0, bestStreak: 0,
   keys: 0, keysTotal: 0, playing: false,
-  inv: {}, selected: 2, // start on Stone
+  inv: {}, selected: 2,     // start on Stone
+  pickFactor: 1,            // pickaxe speed multiplier (rises with level)
 };
 
 let world = null;
 let objectives = null;
 let target = null;          // { hit:{x,y,z,id}, prev:{x,y,z} } | null
 let targetEntry = null;     // question entry under the crosshair | null
+
+// ---- Mining (hold-to-break) + crack overlay ----
+let leftHeld = false;
+let mining = null;          // { x, y, z, id, progress, swingTimer } | null
+let crackStage = -1;
+const crackMesh = new THREE.Mesh(
+  new THREE.BoxGeometry(1.003, 1.003, 1.003),
+  new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 })
+);
+crackMesh.visible = false;
+scene.add(crackMesh);
+
+// ---- Break particles ----
+const particles = [];
+function spawnParticles(cx, cy, cz, hex) {
+  const geo = new THREE.BoxGeometry(0.14, 0.14, 0.14);
+  const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(hex) });
+  for (let i = 0; i < 12; i++) {
+    const p = new THREE.Mesh(geo, mat);
+    p.position.set(cx, cy, cz);
+    const v = new THREE.Vector3((Math.random() - 0.5) * 3.5, Math.random() * 3 + 1, (Math.random() - 0.5) * 3.5);
+    scene.add(p);
+    particles.push({ mesh: p, v, life: 0.7 });
+  }
+}
+function updateParticles(dt) {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.life -= dt;
+    p.v.y -= 12 * dt;
+    p.mesh.position.addScaledVector(p.v, dt);
+    if (p.life <= 0) { scene.remove(p.mesh); p.mesh.geometry.dispose(); particles.splice(i, 1); }
+  }
+}
 
 // ---- DOM ----
 const el = {
@@ -1741,7 +1883,16 @@ function buildLevel(level) {
   state.keys = 0;
   state.keysTotal = objectives.total;
   // starter blocks so you can build right away (plus whatever you mine)
-  state.inv = { [B.GRASS]: 0, [B.DIRT]: 0, [B.STONE]: 20, [B.SAND]: 0, [B.WOOD]: 10, [B.LEAVES]: 0 };
+  state.inv = {
+    [B.GRASS]: 0, [B.DIRT]: 0, [B.STONE]: 20, [B.SAND]: 0, [B.WOOD]: 10, [B.LEAVES]: 0,
+    [B.GLOW]: 0, [B.RUBY]: 0, [B.SAPPHIRE]: 0,
+  };
+  // pickaxe tier rises with level (wood -> stone -> iron), mining faster each time
+  const tier = Math.min(level, 3);
+  state.pickFactor = [1, 1, 1.6, 2.4][tier];
+  viewModel.setTier(tier);
+  cancelMining();
+
   renderHotbar();
   el.hudTier.textContent = `📚 ${tierName} — dig to ${objectives.total} glowing beacons`;
   updateHud();
@@ -1749,15 +1900,50 @@ function buildLevel(level) {
 }
 
 // ---- Mining / building ----
-function mine() {
-  if (!target) return;
-  const { x, y, z, id } = target.hit;
-  if (id === B.QUESTION) { openQuiz(); return; }
-  // collect the block if it's a placeable type
-  if (BLOCK_INFO[id]) state.inv[id] = (state.inv[id] || 0) + 1;
-  world.set(x, y, z, B.AIR);
+function cancelMining() {
+  mining = null;
+  crackStage = -1;
+  crackMesh.visible = false;
+}
+
+// Called every frame: hold left mouse on a block to break it over time.
+function updateMining(dt) {
+  if (!state.playing || quiz.isOpen() || !leftHeld || !target || target.hit.id === B.QUESTION) {
+    cancelMining();
+    return;
+  }
+  const h = target.hit;
+  if (!mining || mining.x !== h.x || mining.y !== h.y || mining.z !== h.z) {
+    mining = { x: h.x, y: h.y, z: h.z, id: h.id, progress: 0, swingTimer: 0 };
+  }
+  // time to break = hardness / pickaxe speed
+  mining.progress += dt * state.pickFactor / hardness(h.id);
+
+  // keep swinging + a soft dig tick
+  mining.swingTimer -= dt;
+  if (mining.swingTimer <= 0) { viewModel.swing(); Sfx.mine(); mining.swingTimer = 0.3; }
+
+  // crack overlay
+  const stage = Math.max(0, Math.min(9, Math.floor(mining.progress * 10)));
+  crackMesh.position.set(h.x + 0.5, h.y + 0.5, h.z + 0.5);
+  crackMesh.visible = true;
+  if (stage !== crackStage) {
+    crackStage = stage;
+    crackMesh.material.map = getCrackTexture(stage);
+    crackMesh.material.needsUpdate = true;
+  }
+
+  if (mining.progress >= 1) breakBlock(h);
+}
+
+function breakBlock(h) {
+  if (BLOCK_INFO[h.id]) state.inv[h.id] = (state.inv[h.id] || 0) + 1; // collect
+  spawnParticles(h.x + 0.5, h.y + 0.5, h.z + 0.5, BLOCK_INFO[h.id] ? BLOCK_INFO[h.id].color : '#888888');
+  Sfx.breakBlock();
+  world.set(h.x, h.y, h.z, B.AIR);
   world.rebuild();
   renderHotbar();
+  cancelMining(); // will re-target / re-start on the next block while held
 }
 
 function build() {
@@ -1781,9 +1967,8 @@ function overlapsPlayer(x, y, z) {
 }
 
 // ---- Quiz ----
-function openQuiz() {
-  if (!targetEntry || quiz.isOpen()) return;
-  const entry = targetEntry;
+function openQuiz(entry = targetEntry) {
+  if (!entry || quiz.isOpen()) return;
   releaseControl();
   quiz.open(entry.question, {
     onCorrect: () => {
@@ -1798,12 +1983,17 @@ function openQuiz() {
       world.rebuild();
       state.keys++;
       Sfx.collect();
+      // reward: unlock a stack of special glowing build blocks (more for streaks)
+      const rewardId = REWARD_BLOCKS[(state.keys - 1) % REWARD_BLOCKS.length];
+      const amount = 3 + Math.min(state.streak, 5);
+      state.inv[rewardId] = (state.inv[rewardId] || 0) + amount;
+      renderHotbar();
       updateHud();
       if (objectives.solvedCount >= objectives.total) {
         toast('🌟 Portal unlocked! Head to the center!', 2600);
         Sfx.portal();
       } else {
-        toast(`🔑 Key collected! ${state.keys}/${state.keysTotal}`);
+        toast(`🔑 Key + ${amount} ${BLOCK_INFO[rewardId].name} blocks to build with!`, 2400);
       }
       resumeControl();
     },
@@ -1891,10 +2081,17 @@ renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
 renderer.domElement.addEventListener('mousedown', (e) => {
   if (!state.playing || quiz.isOpen()) return;
   if (!player.locked) { player.requestLock(); return; }
-  viewModel.swing();
-  if (e.button === 0) mine();        // left click
-  else if (e.button === 2) build();  // right click
+  if (e.button === 0) {
+    // left: click an uncovered question to answer; otherwise hold to mine
+    if (target && target.hit.id === B.QUESTION) { viewModel.swing(); openQuiz(); }
+    else { leftHeld = true; viewModel.swing(); }
+  } else if (e.button === 2) {
+    viewModel.swing();
+    build();   // right: place a block (instant)
+  }
 });
+window.addEventListener('mouseup', (e) => { if (e.button === 0) { leftHeld = false; cancelMining(); } });
+document.addEventListener('pointerlockchange', () => { if (!document.pointerLockElement) { leftHeld = false; cancelMining(); } });
 
 // ---- Resize ----
 window.addEventListener('resize', () => {
@@ -1916,6 +2113,7 @@ function animate() {
   const k = player.keys;
   const moving = state.playing && player.onGround && (k['KeyW'] || k['KeyA'] || k['KeyS'] || k['KeyD']);
   viewModel.update(dt, !!moving);
+  updateParticles(dt);
 
   if (objectives && state.playing) {
     objectives.update(dt, t);
@@ -1924,6 +2122,8 @@ function animate() {
     target = quiz.isOpen() ? null : world.raycast(player.eyePosition(), player.forward(), 6);
     targetEntry = (target && target.hit.id === B.QUESTION)
       ? objectives.getQuestionAt(target.hit.x, target.hit.y, target.hit.z) : null;
+
+    updateMining(dt);
 
     if (target) {
       highlight.position.set(target.hit.x + 0.5, target.hit.y + 0.5, target.hit.z + 0.5);
@@ -1960,7 +2160,9 @@ window.WordCraft = {
   player, quiz, scene, viewModel,
   get target() { return target; },
   get targetEntry() { return targetEntry; },
-  mine, build,
+  build, breakBlock, openQuiz,
+  mineTarget() { if (target && target.hit.id !== B.QUESTION) breakBlock(target.hit); },
+  answerNearest() { const e = objectives.entries.find((x) => !x.solved); if (e) openQuiz(e); return !!e; },
   digToFirstQuestion() {
     const e = objectives && objectives.entries.find((x) => !x.solved);
     if (!e) return false;
