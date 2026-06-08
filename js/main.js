@@ -2,14 +2,14 @@
 // blocks, answer English questions for keys, BUILD with what you mine, then open
 // the portal to advance.
 import * as THREE from 'three';
-import { World, WORLD_SIZE, B, BLOCK_INFO, hardness } from './world.js';
+import { World, WORLD_SIZE, B, BLOCK_INFO, hardness, T, TOOL_INFO, toolFactor } from './world.js';
 import { Player } from './player.js';
 import { Objectives } from './objectives.js';
 import { Quiz } from './quiz.js';
 import { pickQuestions, TIERS } from './questions.js';
 import { Sfx, Music } from './audio.js';
 import { ViewModel } from './viewmodel.js';
-import { getCrackTexture } from './textures.js';
+import { getCrackTexture, getToolIcon } from './textures.js';
 
 // ---- Renderer / scene ----
 const container = document.getElementById('game');
@@ -45,13 +45,20 @@ const player = new Player(camera, renderer.domElement);
 const quiz = new Quiz();
 
 // ---- Game state ----
-const HOTBAR = [B.GRASS, B.DIRT, B.STONE, B.SAND, B.WOOD, B.LEAVES, B.GLOW, B.RUBY, B.SAPPHIRE];
+// The hotbar mixes TOOLS (pick the right one to dig faster) and BLOCKS (place
+// with right-click). Each slot is tagged so selection logic knows which is which.
+const HOTBAR = [
+  { kind: 'tool', id: T.PICKAXE }, { kind: 'tool', id: T.AXE },
+  { kind: 'tool', id: T.SHOVEL }, { kind: 'tool', id: T.SWORD },
+  { kind: 'block', id: B.STONE }, { kind: 'block', id: B.WOOD }, { kind: 'block', id: B.DIRT },
+  { kind: 'block', id: B.GLOW }, { kind: 'block', id: B.RUBY }, { kind: 'block', id: B.SAPPHIRE },
+];
 const REWARD_BLOCKS = [B.GLOW, B.RUBY, B.SAPPHIRE];
 const state = {
   level: 1, score: 0, streak: 0, bestStreak: 0,
   keys: 0, keysTotal: 0, playing: false,
-  inv: {}, selected: 2,     // start on Stone
-  pickFactor: 1,            // pickaxe speed multiplier (rises with level)
+  inv: {}, selected: 0,     // start holding the Pickaxe
+  pickFactor: 1,            // base mining speed multiplier (rises with level)
 };
 
 let world = null;
@@ -133,18 +140,29 @@ function updateHud() {
 // ---- Hotbar / inventory ----
 function renderHotbar() {
   el.hotbar.innerHTML = '';
-  HOTBAR.forEach((id, i) => {
-    const info = BLOCK_INFO[id];
+  HOTBAR.forEach((sd, i) => {
     const slot = document.createElement('div');
-    slot.className = 'slot' + (i === state.selected ? ' sel' : '');
-    slot.innerHTML =
-      `<span class="swatch" style="background:${info.color}"></span>` +
-      `<span class="count">${state.inv[id] || 0}</span>` +
-      `<span class="num">${i + 1}</span>`;
-    slot.title = info.name;
+    const isTool = sd.kind === 'tool';
+    slot.className = 'slot' + (isTool ? ' tool' : '') + (i === state.selected ? ' sel' : '');
+    const numLabel = i < 9 ? `<span class="num">${i + 1}</span>` : '';
+    if (isTool) {
+      slot.innerHTML = `<span class="icon" style="background-image:url(${getToolIcon(sd.id)})"></span>` + numLabel;
+      slot.title = TOOL_INFO[sd.id].name;
+    } else {
+      const info = BLOCK_INFO[sd.id];
+      slot.innerHTML =
+        `<span class="swatch" style="background:${info.color}"></span>` +
+        `<span class="count">${state.inv[sd.id] || 0}</span>` + numLabel;
+      slot.title = info.name;
+    }
     slot.addEventListener('click', () => { state.selected = i; renderHotbar(); });
     el.hotbar.appendChild(slot);
   });
+  // keep the held model in sync with the selection
+  const sel = HOTBAR[state.selected];
+  viewModel.setHeld(sel.kind === 'tool'
+    ? { kind: 'tool', id: sel.id }
+    : { kind: 'block', id: sel.id, color: BLOCK_INFO[sel.id].color });
 }
 
 // ---- Level building ----
@@ -165,6 +183,8 @@ function buildLevel(level) {
 
   const rng = (() => { let s = seed ^ 0x55aa; return () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; }; })();
   objectives = new Objectives(scene, world, questions, rng); // edits voxels
+  const structCount = Math.min(3 + Math.floor(level / 2), 6);
+  world.addStructures(rng, structCount, { entries: objectives.entries }); // buildings on top
   world.rebuild();                          // build meshes from final voxels
 
   player.setWorld(world);
@@ -205,8 +225,10 @@ function updateMining(dt) {
   if (!mining || mining.x !== h.x || mining.y !== h.y || mining.z !== h.z) {
     mining = { x: h.x, y: h.y, z: h.z, id: h.id, progress: 0, swingTimer: 0 };
   }
-  // time to break = hardness / pickaxe speed
-  mining.progress += dt * state.pickFactor / hardness(h.id);
+  // break speed = base pickaxe speed × how good the held tool is for this block
+  const sel = HOTBAR[state.selected];
+  const selTool = sel.kind === 'tool' ? sel.id : T.HAND;
+  mining.progress += dt * state.pickFactor * toolFactor(selTool, h.id) / hardness(h.id);
 
   // keep swinging + a soft dig tick
   mining.swingTimer -= dt;
@@ -237,7 +259,9 @@ function breakBlock(h) {
 
 function build() {
   if (!target) return;
-  const id = HOTBAR[state.selected];
+  const sel = HOTBAR[state.selected];
+  if (sel.kind !== 'block') { toast('Hold a block to build (keys 5–9)'); return; }
+  const id = sel.id;
   if ((state.inv[id] || 0) <= 0) { toast(`No ${BLOCK_INFO[id].name} left to place`); return; }
   const { x, y, z } = target.prev;
   if (world.get(x, y, z) !== B.AIR) return;
@@ -321,7 +345,7 @@ function startGame() {
   state.playing = true;
   player.setEnabled(true);
   player.requestLock();
-  toast('⛏️ Left-click to mine • right-click to build • dig to the beacons!', 3600);
+  toast('⛏️ Pick a tool (1–4) • left-click mine • right-click build • dig to the beacons!', 4200);
 }
 
 function nextLevel() {

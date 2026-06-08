@@ -40,6 +40,22 @@ const HARDNESS = {
 };
 export function hardness(id) { return HARDNESS[id] ?? 0.6; }
 
+// ---- Tools ----
+// The player picks a tool from the hotbar; the right tool digs its matching
+// material much faster. HAND is the implicit "no tool" (a block is selected).
+export const T = { HAND: 0, PICKAXE: 1, AXE: 2, SHOVEL: 3, SWORD: 4 };
+export const TOOL_INFO = {
+  [T.PICKAXE]: { name: 'Pickaxe', good: [B.STONE, B.GLOW, B.RUBY, B.SAPPHIRE] },
+  [T.AXE]:     { name: 'Axe',     good: [B.WOOD, B.LEAVES] },
+  [T.SHOVEL]:  { name: 'Shovel',  good: [B.DIRT, B.GRASS, B.SAND] },
+  [T.SWORD]:   { name: 'Sword',   good: [B.LEAVES] }, // fast swing, snips leaves/plants
+};
+// 3x on a matching material, 1x otherwise / by hand. No penalty — kind to beginners.
+export function toolFactor(toolId, blockId) {
+  const info = TOOL_INFO[toolId];
+  return info && info.good.includes(blockId) ? 3 : 1;
+}
+
 function makeRng(seed) {
   let s = seed >>> 0;
   return () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; };
@@ -69,6 +85,7 @@ export class World {
     this.group = new THREE.Group();
     this.blockGroup = new THREE.Group();
     this.group.add(this.blockGroup);
+    this.structures = []; // footprints { x, z, r } of placed buildings
     this._generate();
     this._addWater();
   }
@@ -246,6 +263,125 @@ export class World {
       spots.push({ x, z, y: sy });
     }
     return spots;
+  }
+
+  // ---- Hand-built structures ----------------------------------------------
+  // Buildings made of ordinary blocks, placed on dry flat land. They give the
+  // island landmarks to explore and a little loot to mine. One house is anchored
+  // over a buried question so digging through its floor uncovers it.
+  addStructures(rng, count, opts = {}) {
+    const entries = opts.entries || [];
+    let placed = 0;
+    // Anchor a house over a buried question first, so findStructureSpots avoids it.
+    if (entries.length && count > 0) {
+      const e = entries[Math.floor(rng() * entries.length)];
+      this._house(e.x, e.z, this.surfaceY(e.x, e.z), rng);
+      this.structures.push({ x: e.x, z: e.z, r: 4 });
+      placed++;
+    }
+    // Scatter the rest on flat dry land.
+    const types = ['house', 'tower', 'well'];
+    for (const s of this.findStructureSpots(count - placed, rng)) {
+      const g = this.surfaceY(s.x, s.z);
+      const type = types[Math.floor(rng() * types.length)];
+      if (type === 'tower') this._tower(s.x, s.z, g, rng);
+      else if (type === 'well') this._well(s.x, s.z, g, rng);
+      else this._house(s.x, s.z, g, rng);
+      this.structures.push({ x: s.x, z: s.z, r: 4 });
+    }
+  }
+
+  // Spread-out, dry, roughly-flat 5x5 spots away from the central portal.
+  findStructureSpots(count, rng) {
+    const spots = [];
+    const cx = WORLD_SIZE / 2, cz = WORLD_SIZE / 2;
+    let attempts = 0;
+    while (spots.length < count && attempts < 4000) {
+      attempts++;
+      const x = 6 + Math.floor(rng() * (WORLD_SIZE - 12));
+      const z = 6 + Math.floor(rng() * (WORLD_SIZE - 12));
+      const sy = this.surfaceY(x, z);
+      if (sy <= WATER_LEVEL + 1) continue;             // not on/under water
+      if (Math.hypot(x - cx, z - cz) < 8) continue;     // clear of the portal
+      let flat = true;                                  // require an even footprint
+      for (let dz = -2; dz <= 2 && flat; dz++)
+        for (let dx = -2; dx <= 2; dx++) {
+          const h = this.surfaceY(x + dx, z + dz);
+          if (Math.abs(h - sy) > 2 || h <= WATER_LEVEL + 1) { flat = false; break; }
+        }
+      if (!flat) continue;
+      if (spots.some((s) => Math.hypot(s.x - x, s.z - z) < 8)) continue;
+      if (this.structures.some((s) => Math.hypot(s.x - x, s.z - z) < 8)) continue;
+      spots.push({ x, z, y: sy });
+    }
+    return spots;
+  }
+
+  // Flatten a footprint to `baseY`: fill gaps below it solid, clear everything
+  // above (trees/slopes), so a building never floats or half-sinks.
+  _levelGround(x0, z0, w, d, baseY) {
+    for (let z = z0; z < z0 + d; z++)
+      for (let x = x0; x < x0 + w; x++) {
+        for (let y = 0; y < baseY; y++)
+          if (!this.isSolid(this.get(x, y, z))) this.set(x, y, z, y >= baseY - 1 ? B.DIRT : B.STONE);
+        for (let y = baseY; y < WORLD_HEIGHT; y++) this.set(x, y, z, B.AIR);
+      }
+  }
+
+  // A 5x5 cottage: wood floor + walls (doorway + windows), leaf roof, a glowstone
+  // lamp and a small loot stash inside.
+  _house(cx, cz, g, rng) {
+    const w = 5, d = 5, x0 = cx - 2, z0 = cz - 2, baseY = g;
+    this._levelGround(x0, z0, w, d, baseY);
+    const floorY = baseY - 1, wallTop = baseY + 2;
+    for (let z = z0; z < z0 + d; z++)
+      for (let x = x0; x < x0 + w; x++) this.set(x, floorY, z, B.WOOD);
+    for (let y = baseY; y <= wallTop; y++)
+      for (let z = z0; z < z0 + d; z++)
+        for (let x = x0; x < x0 + w; x++)
+          if (x === x0 || x === x0 + w - 1 || z === z0 || z === z0 + d - 1) this.set(x, y, z, B.WOOD);
+    // doorway (front wall, 2 tall) + side windows
+    this.set(cx, baseY, z0 + d - 1, B.AIR);
+    this.set(cx, baseY + 1, z0 + d - 1, B.AIR);
+    this.set(x0, baseY + 1, cz, B.AIR);
+    this.set(x0 + w - 1, baseY + 1, cz, B.AIR);
+    // overhanging roof
+    const roofY = wallTop + 1;
+    for (let z = z0 - 1; z <= z0 + d; z++)
+      for (let x = x0 - 1; x <= x0 + w; x++) this.set(x, roofY, z, B.WOOD);
+    // lamp + corner loot to mine
+    this.set(cx, baseY + 2, cz, B.GLOW);
+    this.set(x0 + 1, baseY, z0 + 1, B.RUBY);
+    this.set(x0 + 1, baseY, z0 + 2, B.SAPPHIRE);
+    this.set(x0 + 1, baseY + 1, z0 + 1, B.GLOW);
+  }
+
+  // A stone watchtower with a glowstone light on top — a far-visible landmark.
+  _tower(cx, cz, g, rng) {
+    const w = 3, x0 = cx - 1, z0 = cz - 1, baseY = g;
+    this._levelGround(x0, z0, w, w, baseY);
+    const h = 5 + Math.floor(rng() * 3);
+    for (let y = baseY; y < baseY + h; y++)
+      for (let z = z0; z < z0 + w; z++)
+        for (let x = x0; x < x0 + w; x++)
+          if (x === x0 || x === x0 + w - 1 || z === z0 || z === z0 + w - 1) this.set(x, y, z, B.STONE);
+    const topY = baseY + h;
+    for (const [dx, dz] of [[0, 0], [2, 0], [0, 2], [2, 2]]) this.set(x0 + dx, topY, z0 + dz, B.STONE);
+    this.set(cx, topY, cz, B.GLOW);
+  }
+
+  // A small stone well with wooden posts and a leaf canopy.
+  _well(cx, cz, g, rng) {
+    const w = 3, x0 = cx - 1, z0 = cz - 1, baseY = g;
+    this._levelGround(x0, z0, w, w, baseY);
+    for (let y = baseY; y <= baseY + 1; y++)
+      for (let z = z0; z < z0 + w; z++)
+        for (let x = x0; x < x0 + w; x++)
+          if (x === x0 || x === x0 + w - 1 || z === z0 || z === z0 + w - 1) this.set(x, y, z, B.STONE);
+    this.set(cx, baseY, cz, B.SAPPHIRE); // water in the middle
+    for (const [dx, dz] of [[0, 0], [2, 0], [0, 2], [2, 2]]) this.set(x0 + dx, baseY + 2, z0 + dz, B.WOOD);
+    for (let z = z0; z < z0 + w; z++)
+      for (let x = x0; x < x0 + w; x++) this.set(x, baseY + 3, z, B.LEAVES);
   }
 
   dispose() {

@@ -52,20 +52,63 @@ export class ViewModel {
     sleeve.position.y = -0.08; // cuff at the elbow
     this.arm.add(sleeve);
 
-    // Held pickaxe — gripped by the fist (top of the forearm) and swings with it.
-    this.tool = new THREE.Group();
-    const handle = new THREE.Mesh(
-      new THREE.BoxGeometry(0.12, 1.0, 0.12),
-      new THREE.MeshLambertMaterial({ color: 0x5c3f1f })
-    );
-    this.tool.add(handle);
-    this._headMat = new THREE.MeshLambertMaterial({ color: 0x8d8d8d });
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.16, 0.16), this._headMat);
-    head.position.y = 0.5; // crossbar near the top of the handle
-    this.tool.add(head);
-    this.tool.position.set(0.02, 1.2, 0.16);
-    this.tool.rotation.set(0.55, 0.0, 0.25);
-    this.arm.add(this.tool);
+    // Held items — each is gripped by the fist (top of the forearm) and swings
+    // with the arm. Only one is visible at a time (see setHeld). Their metal
+    // parts are collected in _metalMats so setTier() can re-colour them by level.
+    this._metalMats = [];
+    const metal = () => { const m = new THREE.MeshLambertMaterial({ color: 0x8d8d8d }); this._metalMats.push(m); return m; };
+    const wood = (c = 0x5c3f1f) => new THREE.MeshLambertMaterial({ color: c });
+    const handleGeo = new THREE.BoxGeometry(0.12, 1.0, 0.12);
+
+    this.heldItems = {};
+    const addItem = (key, group) => {
+      group.position.set(0.02, 1.2, 0.16);
+      group.rotation.set(0.55, 0.0, 0.25);
+      group.visible = false;
+      this.arm.add(group);
+      this.heldItems[key] = group;
+    };
+
+    // Pickaxe: handle + a wide crossbar head.
+    const pick = new THREE.Group();
+    pick.add(new THREE.Mesh(handleGeo, wood()));
+    const pickHead = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.16, 0.16), metal());
+    pickHead.position.y = 0.5; pick.add(pickHead);
+    addItem('pickaxe', pick);
+
+    // Axe: handle + a chunky head offset to one side.
+    const axe = new THREE.Group();
+    axe.add(new THREE.Mesh(handleGeo, wood()));
+    const axeHead = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.36, 0.14), metal());
+    axeHead.position.set(0.20, 0.42, 0); axe.add(axeHead);
+    addItem('axe', axe);
+
+    // Shovel: handle + a flat blade.
+    const shovel = new THREE.Group();
+    shovel.add(new THREE.Mesh(handleGeo, wood()));
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.32, 0.08), metal());
+    blade.position.y = 0.56; shovel.add(blade);
+    addItem('shovel', shovel);
+
+    // Sword: blade + gold crossguard + grip.
+    const sword = new THREE.Group();
+    const swBlade = new THREE.Mesh(new THREE.BoxGeometry(0.10, 1.05, 0.14), metal());
+    swBlade.position.y = 0.35; sword.add(swBlade);
+    const guard = new THREE.Mesh(new THREE.BoxGeometry(0.40, 0.10, 0.16), wood(0xc9a528));
+    guard.position.y = -0.18; sword.add(guard);
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.26, 0.12), wood());
+    grip.position.y = -0.38; sword.add(grip);
+    addItem('sword', sword);
+
+    // Held block: a small tinted cube shown when a block slot is selected.
+    const block = new THREE.Group();
+    this._blockMat = new THREE.MeshLambertMaterial({ color: 0x6abe30 });
+    const cube = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), this._blockMat);
+    cube.position.y = 0.35; block.add(cube);
+    addItem('block', block);
+
+    this._heldKey = 'pickaxe';
+    this.heldItems.pickaxe.visible = true;
     this.setTier(1);
 
     // Rest pose: elbow low-right (off-screen), forearm angles up-left toward
@@ -90,11 +133,28 @@ export class ViewModel {
     this.swingT = 0;
   }
 
-  // Pickaxe tier: 1 = wood, 2 = stone, 3 = iron (just changes the head colour).
+  // Tool tier: 1 = wood, 2 = stone, 3 = iron (re-colours every metal head).
   setTier(tier) {
     const colors = { 1: 0x8a6a3a, 2: 0x8d8d8d, 3: 0xcfd6e0 };
     this._tier = tier;
-    if (this._headMat) this._headMat.color.setHex(colors[Math.min(tier, 3)] || 0x8d8d8d);
+    const hex = colors[Math.min(tier, 3)] || 0x8d8d8d;
+    for (const m of this._metalMats) m.color.setHex(hex);
+  }
+
+  // Show the held item matching the selected hotbar slot.
+  // slot = { kind: 'tool'|'block', id, color? }
+  setHeld(slot) {
+    let key = 'block';
+    if (slot.kind === 'tool') {
+      // T.PICKAXE=1, T.AXE=2, T.SHOVEL=3, T.SWORD=4
+      key = { 1: 'pickaxe', 2: 'axe', 3: 'shovel', 4: 'sword' }[slot.id] || 'pickaxe';
+    } else if (this._blockMat && slot.color) {
+      this._blockMat.color.set(slot.color);
+    }
+    if (key === this._heldKey) return;
+    if (this.heldItems[this._heldKey]) this.heldItems[this._heldKey].visible = false;
+    this.heldItems[key].visible = true;
+    this._heldKey = key;
   }
 
   update(dt, moving) {

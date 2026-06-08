@@ -161,6 +161,50 @@ function solidGlow(color, emissive, intensity) {
   return [m, m, m, m, m, m];
 }
 
+// ---- Hotbar tool icons ----
+// Tiny drawn icons for the tool slots (returned as data URLs for CSS
+// background-image). Drawn rather than emoji so they look the same everywhere.
+const _toolIcons = {};
+export function getToolIcon(toolId) {
+  if (_toolIcons[toolId]) return _toolIcons[toolId];
+  const S = 32;
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const ctx = c.getContext('2d');
+  const WOODC = '#7a542a', METAL = '#c9ccd6', GOLD = '#ffd23f';
+  const r = (x, y, w, h, col) => { ctx.fillStyle = col; ctx.fillRect(x, y, w, h); };
+  ctx.save();
+  ctx.translate(S / 2, S / 2);
+  ctx.rotate(-Math.PI / 4); // hold the tool on a diagonal
+  switch (toolId) {
+    case 1: // pickaxe
+      r(-2, -6, 4, 19, WOODC);
+      r(-11, -13, 22, 4, METAL);
+      r(-2, -9, 4, 3, METAL);
+      break;
+    case 2: // axe
+      r(-2, -6, 4, 19, WOODC);
+      r(2, -14, 10, 12, METAL);
+      break;
+    case 3: // shovel
+      r(-2, -4, 4, 17, WOODC);
+      r(-5, -15, 10, 11, METAL);
+      break;
+    case 4: // sword
+      r(-2, -14, 4, 19, METAL);
+      r(-8, 5, 16, 3, GOLD);
+      r(-2, 8, 4, 6, WOODC);
+      r(-3, 14, 6, 2, GOLD);
+      break;
+    default:
+      r(-2, -6, 4, 19, WOODC);
+  }
+  ctx.restore();
+  const url = c.toDataURL();
+  _toolIcons[toolId] = url;
+  return url;
+}
+
 // Crack-overlay textures for the hold-to-mine effect (stages 0..9). Transparent
 // background so only the crack lines show on top of the block being mined.
 const _crack = {};

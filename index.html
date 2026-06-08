@@ -128,6 +128,15 @@ html, body {
   border: 2px solid rgba(0,0,0,0.35);
   image-rendering: pixelated;
 }
+#hotbar .icon {
+  width: 38px; height: 38px;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  image-rendering: pixelated;
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,0.6));
+}
+#hotbar .slot.tool { background: rgba(40,30,18,0.72); }
 #hotbar .count {
   position: absolute;
   bottom: 2px; right: 5px;
@@ -385,7 +394,7 @@ kbd {
         <div><kbd>Mouse</kbd> Look around</div>
         <div><kbd>Left-click</kbd> ⛏️ Mine blocks</div>
         <div><kbd>Right-click</kbd> 🧱 Place blocks</div>
-        <div><kbd>1</kbd>–<kbd>6</kbd> / scroll: pick a block</div>
+        <div><kbd>1</kbd>–<kbd>4</kbd> Tools &nbsp; <kbd>5</kbd>–<kbd>9</kbd> Blocks</div>
         <div><kbd>E</kbd> Answer / enter portal</div>
       </div>
       <p class="mission">🎯 <b>Mission:</b> Dig down to the glowing beacons to uncover buried question blocks, answer correctly to collect keys, build whatever you like along the way, then open the portal to advance!</p>
@@ -590,6 +599,50 @@ function getBlockMaterials(type) {
 function solidGlow(color, emissive, intensity) {
   const m = new THREE.MeshLambertMaterial({ color, emissive, emissiveIntensity: intensity });
   return [m, m, m, m, m, m];
+}
+
+// ---- Hotbar tool icons ----
+// Tiny drawn icons for the tool slots (returned as data URLs for CSS
+// background-image). Drawn rather than emoji so they look the same everywhere.
+const _toolIcons = {};
+function getToolIcon(toolId) {
+  if (_toolIcons[toolId]) return _toolIcons[toolId];
+  const S = 32;
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const ctx = c.getContext('2d');
+  const WOODC = '#7a542a', METAL = '#c9ccd6', GOLD = '#ffd23f';
+  const r = (x, y, w, h, col) => { ctx.fillStyle = col; ctx.fillRect(x, y, w, h); };
+  ctx.save();
+  ctx.translate(S / 2, S / 2);
+  ctx.rotate(-Math.PI / 4); // hold the tool on a diagonal
+  switch (toolId) {
+    case 1: // pickaxe
+      r(-2, -6, 4, 19, WOODC);
+      r(-11, -13, 22, 4, METAL);
+      r(-2, -9, 4, 3, METAL);
+      break;
+    case 2: // axe
+      r(-2, -6, 4, 19, WOODC);
+      r(2, -14, 10, 12, METAL);
+      break;
+    case 3: // shovel
+      r(-2, -4, 4, 17, WOODC);
+      r(-5, -15, 10, 11, METAL);
+      break;
+    case 4: // sword
+      r(-2, -14, 4, 19, METAL);
+      r(-8, 5, 16, 3, GOLD);
+      r(-2, 8, 4, 6, WOODC);
+      r(-3, 14, 6, 2, GOLD);
+      break;
+    default:
+      r(-2, -6, 4, 19, WOODC);
+  }
+  ctx.restore();
+  const url = c.toDataURL();
+  _toolIcons[toolId] = url;
+  return url;
 }
 
 // Crack-overlay textures for the hold-to-mine effect (stages 0..9). Transparent
@@ -938,6 +991,22 @@ const HARDNESS = {
 };
 function hardness(id) { return HARDNESS[id] ?? 0.6; }
 
+// ---- Tools ----
+// The player picks a tool from the hotbar; the right tool digs its matching
+// material much faster. HAND is the implicit "no tool" (a block is selected).
+const T = { HAND: 0, PICKAXE: 1, AXE: 2, SHOVEL: 3, SWORD: 4 };
+const TOOL_INFO = {
+  [T.PICKAXE]: { name: 'Pickaxe', good: [B.STONE, B.GLOW, B.RUBY, B.SAPPHIRE] },
+  [T.AXE]:     { name: 'Axe',     good: [B.WOOD, B.LEAVES] },
+  [T.SHOVEL]:  { name: 'Shovel',  good: [B.DIRT, B.GRASS, B.SAND] },
+  [T.SWORD]:   { name: 'Sword',   good: [B.LEAVES] }, // fast swing, snips leaves/plants
+};
+// 3x on a matching material, 1x otherwise / by hand. No penalty — kind to beginners.
+function toolFactor(toolId, blockId) {
+  const info = TOOL_INFO[toolId];
+  return info && info.good.includes(blockId) ? 3 : 1;
+}
+
 function makeRng(seed) {
   let s = seed >>> 0;
   return () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; };
@@ -967,6 +1036,7 @@ class World {
     this.group = new THREE.Group();
     this.blockGroup = new THREE.Group();
     this.group.add(this.blockGroup);
+    this.structures = []; // footprints { x, z, r } of placed buildings
     this._generate();
     this._addWater();
   }
@@ -1144,6 +1214,125 @@ class World {
       spots.push({ x, z, y: sy });
     }
     return spots;
+  }
+
+  // ---- Hand-built structures ----------------------------------------------
+  // Buildings made of ordinary blocks, placed on dry flat land. They give the
+  // island landmarks to explore and a little loot to mine. One house is anchored
+  // over a buried question so digging through its floor uncovers it.
+  addStructures(rng, count, opts = {}) {
+    const entries = opts.entries || [];
+    let placed = 0;
+    // Anchor a house over a buried question first, so findStructureSpots avoids it.
+    if (entries.length && count > 0) {
+      const e = entries[Math.floor(rng() * entries.length)];
+      this._house(e.x, e.z, this.surfaceY(e.x, e.z), rng);
+      this.structures.push({ x: e.x, z: e.z, r: 4 });
+      placed++;
+    }
+    // Scatter the rest on flat dry land.
+    const types = ['house', 'tower', 'well'];
+    for (const s of this.findStructureSpots(count - placed, rng)) {
+      const g = this.surfaceY(s.x, s.z);
+      const type = types[Math.floor(rng() * types.length)];
+      if (type === 'tower') this._tower(s.x, s.z, g, rng);
+      else if (type === 'well') this._well(s.x, s.z, g, rng);
+      else this._house(s.x, s.z, g, rng);
+      this.structures.push({ x: s.x, z: s.z, r: 4 });
+    }
+  }
+
+  // Spread-out, dry, roughly-flat 5x5 spots away from the central portal.
+  findStructureSpots(count, rng) {
+    const spots = [];
+    const cx = WORLD_SIZE / 2, cz = WORLD_SIZE / 2;
+    let attempts = 0;
+    while (spots.length < count && attempts < 4000) {
+      attempts++;
+      const x = 6 + Math.floor(rng() * (WORLD_SIZE - 12));
+      const z = 6 + Math.floor(rng() * (WORLD_SIZE - 12));
+      const sy = this.surfaceY(x, z);
+      if (sy <= WATER_LEVEL + 1) continue;             // not on/under water
+      if (Math.hypot(x - cx, z - cz) < 8) continue;     // clear of the portal
+      let flat = true;                                  // require an even footprint
+      for (let dz = -2; dz <= 2 && flat; dz++)
+        for (let dx = -2; dx <= 2; dx++) {
+          const h = this.surfaceY(x + dx, z + dz);
+          if (Math.abs(h - sy) > 2 || h <= WATER_LEVEL + 1) { flat = false; break; }
+        }
+      if (!flat) continue;
+      if (spots.some((s) => Math.hypot(s.x - x, s.z - z) < 8)) continue;
+      if (this.structures.some((s) => Math.hypot(s.x - x, s.z - z) < 8)) continue;
+      spots.push({ x, z, y: sy });
+    }
+    return spots;
+  }
+
+  // Flatten a footprint to `baseY`: fill gaps below it solid, clear everything
+  // above (trees/slopes), so a building never floats or half-sinks.
+  _levelGround(x0, z0, w, d, baseY) {
+    for (let z = z0; z < z0 + d; z++)
+      for (let x = x0; x < x0 + w; x++) {
+        for (let y = 0; y < baseY; y++)
+          if (!this.isSolid(this.get(x, y, z))) this.set(x, y, z, y >= baseY - 1 ? B.DIRT : B.STONE);
+        for (let y = baseY; y < WORLD_HEIGHT; y++) this.set(x, y, z, B.AIR);
+      }
+  }
+
+  // A 5x5 cottage: wood floor + walls (doorway + windows), leaf roof, a glowstone
+  // lamp and a small loot stash inside.
+  _house(cx, cz, g, rng) {
+    const w = 5, d = 5, x0 = cx - 2, z0 = cz - 2, baseY = g;
+    this._levelGround(x0, z0, w, d, baseY);
+    const floorY = baseY - 1, wallTop = baseY + 2;
+    for (let z = z0; z < z0 + d; z++)
+      for (let x = x0; x < x0 + w; x++) this.set(x, floorY, z, B.WOOD);
+    for (let y = baseY; y <= wallTop; y++)
+      for (let z = z0; z < z0 + d; z++)
+        for (let x = x0; x < x0 + w; x++)
+          if (x === x0 || x === x0 + w - 1 || z === z0 || z === z0 + d - 1) this.set(x, y, z, B.WOOD);
+    // doorway (front wall, 2 tall) + side windows
+    this.set(cx, baseY, z0 + d - 1, B.AIR);
+    this.set(cx, baseY + 1, z0 + d - 1, B.AIR);
+    this.set(x0, baseY + 1, cz, B.AIR);
+    this.set(x0 + w - 1, baseY + 1, cz, B.AIR);
+    // overhanging roof
+    const roofY = wallTop + 1;
+    for (let z = z0 - 1; z <= z0 + d; z++)
+      for (let x = x0 - 1; x <= x0 + w; x++) this.set(x, roofY, z, B.WOOD);
+    // lamp + corner loot to mine
+    this.set(cx, baseY + 2, cz, B.GLOW);
+    this.set(x0 + 1, baseY, z0 + 1, B.RUBY);
+    this.set(x0 + 1, baseY, z0 + 2, B.SAPPHIRE);
+    this.set(x0 + 1, baseY + 1, z0 + 1, B.GLOW);
+  }
+
+  // A stone watchtower with a glowstone light on top — a far-visible landmark.
+  _tower(cx, cz, g, rng) {
+    const w = 3, x0 = cx - 1, z0 = cz - 1, baseY = g;
+    this._levelGround(x0, z0, w, w, baseY);
+    const h = 5 + Math.floor(rng() * 3);
+    for (let y = baseY; y < baseY + h; y++)
+      for (let z = z0; z < z0 + w; z++)
+        for (let x = x0; x < x0 + w; x++)
+          if (x === x0 || x === x0 + w - 1 || z === z0 || z === z0 + w - 1) this.set(x, y, z, B.STONE);
+    const topY = baseY + h;
+    for (const [dx, dz] of [[0, 0], [2, 0], [0, 2], [2, 2]]) this.set(x0 + dx, topY, z0 + dz, B.STONE);
+    this.set(cx, topY, cz, B.GLOW);
+  }
+
+  // A small stone well with wooden posts and a leaf canopy.
+  _well(cx, cz, g, rng) {
+    const w = 3, x0 = cx - 1, z0 = cz - 1, baseY = g;
+    this._levelGround(x0, z0, w, w, baseY);
+    for (let y = baseY; y <= baseY + 1; y++)
+      for (let z = z0; z < z0 + w; z++)
+        for (let x = x0; x < x0 + w; x++)
+          if (x === x0 || x === x0 + w - 1 || z === z0 || z === z0 + w - 1) this.set(x, y, z, B.STONE);
+    this.set(cx, baseY, cz, B.SAPPHIRE); // water in the middle
+    for (const [dx, dz] of [[0, 0], [2, 0], [0, 2], [2, 2]]) this.set(x0 + dx, baseY + 2, z0 + dz, B.WOOD);
+    for (let z = z0; z < z0 + w; z++)
+      for (let x = x0; x < x0 + w; x++) this.set(x, baseY + 3, z, B.LEAVES);
   }
 
   dispose() {
@@ -1504,20 +1693,63 @@ class ViewModel {
     sleeve.position.y = -0.08; // cuff at the elbow
     this.arm.add(sleeve);
 
-    // Held pickaxe — gripped by the fist (top of the forearm) and swings with it.
-    this.tool = new THREE.Group();
-    const handle = new THREE.Mesh(
-      new THREE.BoxGeometry(0.12, 1.0, 0.12),
-      new THREE.MeshLambertMaterial({ color: 0x5c3f1f })
-    );
-    this.tool.add(handle);
-    this._headMat = new THREE.MeshLambertMaterial({ color: 0x8d8d8d });
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.16, 0.16), this._headMat);
-    head.position.y = 0.5; // crossbar near the top of the handle
-    this.tool.add(head);
-    this.tool.position.set(0.02, 1.2, 0.16);
-    this.tool.rotation.set(0.55, 0.0, 0.25);
-    this.arm.add(this.tool);
+    // Held items — each is gripped by the fist (top of the forearm) and swings
+    // with the arm. Only one is visible at a time (see setHeld). Their metal
+    // parts are collected in _metalMats so setTier() can re-colour them by level.
+    this._metalMats = [];
+    const metal = () => { const m = new THREE.MeshLambertMaterial({ color: 0x8d8d8d }); this._metalMats.push(m); return m; };
+    const wood = (c = 0x5c3f1f) => new THREE.MeshLambertMaterial({ color: c });
+    const handleGeo = new THREE.BoxGeometry(0.12, 1.0, 0.12);
+
+    this.heldItems = {};
+    const addItem = (key, group) => {
+      group.position.set(0.02, 1.2, 0.16);
+      group.rotation.set(0.55, 0.0, 0.25);
+      group.visible = false;
+      this.arm.add(group);
+      this.heldItems[key] = group;
+    };
+
+    // Pickaxe: handle + a wide crossbar head.
+    const pick = new THREE.Group();
+    pick.add(new THREE.Mesh(handleGeo, wood()));
+    const pickHead = new THREE.Mesh(new THREE.BoxGeometry(0.66, 0.16, 0.16), metal());
+    pickHead.position.y = 0.5; pick.add(pickHead);
+    addItem('pickaxe', pick);
+
+    // Axe: handle + a chunky head offset to one side.
+    const axe = new THREE.Group();
+    axe.add(new THREE.Mesh(handleGeo, wood()));
+    const axeHead = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.36, 0.14), metal());
+    axeHead.position.set(0.20, 0.42, 0); axe.add(axeHead);
+    addItem('axe', axe);
+
+    // Shovel: handle + a flat blade.
+    const shovel = new THREE.Group();
+    shovel.add(new THREE.Mesh(handleGeo, wood()));
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.32, 0.08), metal());
+    blade.position.y = 0.56; shovel.add(blade);
+    addItem('shovel', shovel);
+
+    // Sword: blade + gold crossguard + grip.
+    const sword = new THREE.Group();
+    const swBlade = new THREE.Mesh(new THREE.BoxGeometry(0.10, 1.05, 0.14), metal());
+    swBlade.position.y = 0.35; sword.add(swBlade);
+    const guard = new THREE.Mesh(new THREE.BoxGeometry(0.40, 0.10, 0.16), wood(0xc9a528));
+    guard.position.y = -0.18; sword.add(guard);
+    const grip = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.26, 0.12), wood());
+    grip.position.y = -0.38; sword.add(grip);
+    addItem('sword', sword);
+
+    // Held block: a small tinted cube shown when a block slot is selected.
+    const block = new THREE.Group();
+    this._blockMat = new THREE.MeshLambertMaterial({ color: 0x6abe30 });
+    const cube = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 0.5), this._blockMat);
+    cube.position.y = 0.35; block.add(cube);
+    addItem('block', block);
+
+    this._heldKey = 'pickaxe';
+    this.heldItems.pickaxe.visible = true;
     this.setTier(1);
 
     // Rest pose: elbow low-right (off-screen), forearm angles up-left toward
@@ -1542,11 +1774,28 @@ class ViewModel {
     this.swingT = 0;
   }
 
-  // Pickaxe tier: 1 = wood, 2 = stone, 3 = iron (just changes the head colour).
+  // Tool tier: 1 = wood, 2 = stone, 3 = iron (re-colours every metal head).
   setTier(tier) {
     const colors = { 1: 0x8a6a3a, 2: 0x8d8d8d, 3: 0xcfd6e0 };
     this._tier = tier;
-    if (this._headMat) this._headMat.color.setHex(colors[Math.min(tier, 3)] || 0x8d8d8d);
+    const hex = colors[Math.min(tier, 3)] || 0x8d8d8d;
+    for (const m of this._metalMats) m.color.setHex(hex);
+  }
+
+  // Show the held item matching the selected hotbar slot.
+  // slot = { kind: 'tool'|'block', id, color? }
+  setHeld(slot) {
+    let key = 'block';
+    if (slot.kind === 'tool') {
+      // T.PICKAXE=1, T.AXE=2, T.SHOVEL=3, T.SWORD=4
+      key = { 1: 'pickaxe', 2: 'axe', 3: 'shovel', 4: 'sword' }[slot.id] || 'pickaxe';
+    } else if (this._blockMat && slot.color) {
+      this._blockMat.color.set(slot.color);
+    }
+    if (key === this._heldKey) return;
+    if (this.heldItems[this._heldKey]) this.heldItems[this._heldKey].visible = false;
+    this.heldItems[key].visible = true;
+    this._heldKey = key;
   }
 
   update(dt, moving) {
@@ -1756,13 +2005,20 @@ const player = new Player(camera, renderer.domElement);
 const quiz = new Quiz();
 
 // ---- Game state ----
-const HOTBAR = [B.GRASS, B.DIRT, B.STONE, B.SAND, B.WOOD, B.LEAVES, B.GLOW, B.RUBY, B.SAPPHIRE];
+// The hotbar mixes TOOLS (pick the right one to dig faster) and BLOCKS (place
+// with right-click). Each slot is tagged so selection logic knows which is which.
+const HOTBAR = [
+  { kind: 'tool', id: T.PICKAXE }, { kind: 'tool', id: T.AXE },
+  { kind: 'tool', id: T.SHOVEL }, { kind: 'tool', id: T.SWORD },
+  { kind: 'block', id: B.STONE }, { kind: 'block', id: B.WOOD }, { kind: 'block', id: B.DIRT },
+  { kind: 'block', id: B.GLOW }, { kind: 'block', id: B.RUBY }, { kind: 'block', id: B.SAPPHIRE },
+];
 const REWARD_BLOCKS = [B.GLOW, B.RUBY, B.SAPPHIRE];
 const state = {
   level: 1, score: 0, streak: 0, bestStreak: 0,
   keys: 0, keysTotal: 0, playing: false,
-  inv: {}, selected: 2,     // start on Stone
-  pickFactor: 1,            // pickaxe speed multiplier (rises with level)
+  inv: {}, selected: 0,     // start holding the Pickaxe
+  pickFactor: 1,            // base mining speed multiplier (rises with level)
 };
 
 let world = null;
@@ -1844,18 +2100,29 @@ function updateHud() {
 // ---- Hotbar / inventory ----
 function renderHotbar() {
   el.hotbar.innerHTML = '';
-  HOTBAR.forEach((id, i) => {
-    const info = BLOCK_INFO[id];
+  HOTBAR.forEach((sd, i) => {
     const slot = document.createElement('div');
-    slot.className = 'slot' + (i === state.selected ? ' sel' : '');
-    slot.innerHTML =
-      `<span class="swatch" style="background:${info.color}"></span>` +
-      `<span class="count">${state.inv[id] || 0}</span>` +
-      `<span class="num">${i + 1}</span>`;
-    slot.title = info.name;
+    const isTool = sd.kind === 'tool';
+    slot.className = 'slot' + (isTool ? ' tool' : '') + (i === state.selected ? ' sel' : '');
+    const numLabel = i < 9 ? `<span class="num">${i + 1}</span>` : '';
+    if (isTool) {
+      slot.innerHTML = `<span class="icon" style="background-image:url(${getToolIcon(sd.id)})"></span>` + numLabel;
+      slot.title = TOOL_INFO[sd.id].name;
+    } else {
+      const info = BLOCK_INFO[sd.id];
+      slot.innerHTML =
+        `<span class="swatch" style="background:${info.color}"></span>` +
+        `<span class="count">${state.inv[sd.id] || 0}</span>` + numLabel;
+      slot.title = info.name;
+    }
     slot.addEventListener('click', () => { state.selected = i; renderHotbar(); });
     el.hotbar.appendChild(slot);
   });
+  // keep the held model in sync with the selection
+  const sel = HOTBAR[state.selected];
+  viewModel.setHeld(sel.kind === 'tool'
+    ? { kind: 'tool', id: sel.id }
+    : { kind: 'block', id: sel.id, color: BLOCK_INFO[sel.id].color });
 }
 
 // ---- Level building ----
@@ -1876,6 +2143,8 @@ function buildLevel(level) {
 
   const rng = (() => { let s = seed ^ 0x55aa; return () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; }; })();
   objectives = new Objectives(scene, world, questions, rng); // edits voxels
+  const structCount = Math.min(3 + Math.floor(level / 2), 6);
+  world.addStructures(rng, structCount, { entries: objectives.entries }); // buildings on top
   world.rebuild();                          // build meshes from final voxels
 
   player.setWorld(world);
@@ -1916,8 +2185,10 @@ function updateMining(dt) {
   if (!mining || mining.x !== h.x || mining.y !== h.y || mining.z !== h.z) {
     mining = { x: h.x, y: h.y, z: h.z, id: h.id, progress: 0, swingTimer: 0 };
   }
-  // time to break = hardness / pickaxe speed
-  mining.progress += dt * state.pickFactor / hardness(h.id);
+  // break speed = base pickaxe speed × how good the held tool is for this block
+  const sel = HOTBAR[state.selected];
+  const selTool = sel.kind === 'tool' ? sel.id : T.HAND;
+  mining.progress += dt * state.pickFactor * toolFactor(selTool, h.id) / hardness(h.id);
 
   // keep swinging + a soft dig tick
   mining.swingTimer -= dt;
@@ -1948,7 +2219,9 @@ function breakBlock(h) {
 
 function build() {
   if (!target) return;
-  const id = HOTBAR[state.selected];
+  const sel = HOTBAR[state.selected];
+  if (sel.kind !== 'block') { toast('Hold a block to build (keys 5–9)'); return; }
+  const id = sel.id;
   if ((state.inv[id] || 0) <= 0) { toast(`No ${BLOCK_INFO[id].name} left to place`); return; }
   const { x, y, z } = target.prev;
   if (world.get(x, y, z) !== B.AIR) return;
@@ -2032,7 +2305,7 @@ function startGame() {
   state.playing = true;
   player.setEnabled(true);
   player.requestLock();
-  toast('⛏️ Left-click to mine • right-click to build • dig to the beacons!', 3600);
+  toast('⛏️ Pick a tool (1–4) • left-click mine • right-click build • dig to the beacons!', 4200);
 }
 
 function nextLevel() {
