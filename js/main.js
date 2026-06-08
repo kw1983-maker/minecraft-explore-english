@@ -2,13 +2,14 @@
 // blocks, answer English questions for keys, BUILD with what you mine, then open
 // the portal to advance.
 import * as THREE from 'three';
-import { World, WORLD_SIZE, B, BLOCK_INFO } from './world.js';
+import { World, WORLD_SIZE, B, BLOCK_INFO, hardness, T, TOOL_INFO, toolFactor } from './world.js';
 import { Player } from './player.js';
 import { Objectives } from './objectives.js';
 import { Quiz } from './quiz.js';
 import { pickQuestions, TIERS } from './questions.js';
 import { Sfx, Music } from './audio.js';
 import { ViewModel } from './viewmodel.js';
+import { getCrackTexture, getToolIcon } from './textures.js';
 
 // ---- Renderer / scene ----
 const container = document.getElementById('game');
@@ -44,17 +45,60 @@ const player = new Player(camera, renderer.domElement);
 const quiz = new Quiz();
 
 // ---- Game state ----
-const HOTBAR = [B.GRASS, B.DIRT, B.STONE, B.SAND, B.WOOD, B.LEAVES];
+// The hotbar mixes TOOLS (pick the right one to dig faster) and BLOCKS (place
+// with right-click). Each slot is tagged so selection logic knows which is which.
+const HOTBAR = [
+  { kind: 'tool', id: T.PICKAXE }, { kind: 'tool', id: T.AXE },
+  { kind: 'tool', id: T.SHOVEL }, { kind: 'tool', id: T.SWORD },
+  { kind: 'block', id: B.STONE }, { kind: 'block', id: B.WOOD }, { kind: 'block', id: B.DIRT },
+  { kind: 'block', id: B.GLOW }, { kind: 'block', id: B.RUBY }, { kind: 'block', id: B.SAPPHIRE },
+];
+const REWARD_BLOCKS = [B.GLOW, B.RUBY, B.SAPPHIRE];
 const state = {
   level: 1, score: 0, streak: 0, bestStreak: 0,
   keys: 0, keysTotal: 0, playing: false,
-  inv: {}, selected: 2, // start on Stone
+  inv: {}, selected: 0,     // start holding the Pickaxe
+  pickFactor: 1,            // base mining speed multiplier (rises with level)
 };
 
 let world = null;
 let objectives = null;
 let target = null;          // { hit:{x,y,z,id}, prev:{x,y,z} } | null
 let targetEntry = null;     // question entry under the crosshair | null
+
+// ---- Mining (hold-to-break) + crack overlay ----
+let leftHeld = false;
+let mining = null;          // { x, y, z, id, progress, swingTimer } | null
+let crackStage = -1;
+const crackMesh = new THREE.Mesh(
+  new THREE.BoxGeometry(1.003, 1.003, 1.003),
+  new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 })
+);
+crackMesh.visible = false;
+scene.add(crackMesh);
+
+// ---- Break particles ----
+const particles = [];
+function spawnParticles(cx, cy, cz, hex) {
+  const geo = new THREE.BoxGeometry(0.14, 0.14, 0.14);
+  const mat = new THREE.MeshBasicMaterial({ color: new THREE.Color(hex) });
+  for (let i = 0; i < 12; i++) {
+    const p = new THREE.Mesh(geo, mat);
+    p.position.set(cx, cy, cz);
+    const v = new THREE.Vector3((Math.random() - 0.5) * 3.5, Math.random() * 3 + 1, (Math.random() - 0.5) * 3.5);
+    scene.add(p);
+    particles.push({ mesh: p, v, life: 0.7 });
+  }
+}
+function updateParticles(dt) {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.life -= dt;
+    p.v.y -= 12 * dt;
+    p.mesh.position.addScaledVector(p.v, dt);
+    if (p.life <= 0) { scene.remove(p.mesh); p.mesh.geometry.dispose(); particles.splice(i, 1); }
+  }
+}
 
 // ---- DOM ----
 const el = {
@@ -96,18 +140,29 @@ function updateHud() {
 // ---- Hotbar / inventory ----
 function renderHotbar() {
   el.hotbar.innerHTML = '';
-  HOTBAR.forEach((id, i) => {
-    const info = BLOCK_INFO[id];
+  HOTBAR.forEach((sd, i) => {
     const slot = document.createElement('div');
-    slot.className = 'slot' + (i === state.selected ? ' sel' : '');
-    slot.innerHTML =
-      `<span class="swatch" style="background:${info.color}"></span>` +
-      `<span class="count">${state.inv[id] || 0}</span>` +
-      `<span class="num">${i + 1}</span>`;
-    slot.title = info.name;
+    const isTool = sd.kind === 'tool';
+    slot.className = 'slot' + (isTool ? ' tool' : '') + (i === state.selected ? ' sel' : '');
+    const numLabel = i < 9 ? `<span class="num">${i + 1}</span>` : '';
+    if (isTool) {
+      slot.innerHTML = `<span class="icon" style="background-image:url(${getToolIcon(sd.id)})"></span>` + numLabel;
+      slot.title = TOOL_INFO[sd.id].name;
+    } else {
+      const info = BLOCK_INFO[sd.id];
+      slot.innerHTML =
+        `<span class="swatch" style="background:${info.color}"></span>` +
+        `<span class="count">${state.inv[sd.id] || 0}</span>` + numLabel;
+      slot.title = info.name;
+    }
     slot.addEventListener('click', () => { state.selected = i; renderHotbar(); });
     el.hotbar.appendChild(slot);
   });
+  // keep the held model in sync with the selection
+  const sel = HOTBAR[state.selected];
+  viewModel.setHeld(sel.kind === 'tool'
+    ? { kind: 'tool', id: sel.id }
+    : { kind: 'block', id: sel.id, color: BLOCK_INFO[sel.id].color });
 }
 
 // ---- Level building ----
@@ -128,6 +183,8 @@ function buildLevel(level) {
 
   const rng = (() => { let s = seed ^ 0x55aa; return () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; }; })();
   objectives = new Objectives(scene, world, questions, rng); // edits voxels
+  const structCount = Math.min(3 + Math.floor(level / 2), 6);
+  world.addStructures(rng, structCount, { entries: objectives.entries }); // buildings on top
   world.rebuild();                          // build meshes from final voxels
 
   player.setWorld(world);
@@ -135,7 +192,16 @@ function buildLevel(level) {
   state.keys = 0;
   state.keysTotal = objectives.total;
   // starter blocks so you can build right away (plus whatever you mine)
-  state.inv = { [B.GRASS]: 0, [B.DIRT]: 0, [B.STONE]: 20, [B.SAND]: 0, [B.WOOD]: 10, [B.LEAVES]: 0 };
+  state.inv = {
+    [B.GRASS]: 0, [B.DIRT]: 0, [B.STONE]: 20, [B.SAND]: 0, [B.WOOD]: 10, [B.LEAVES]: 0,
+    [B.GLOW]: 0, [B.RUBY]: 0, [B.SAPPHIRE]: 0,
+  };
+  // pickaxe tier rises with level (wood -> stone -> iron), mining faster each time
+  const tier = Math.min(level, 3);
+  state.pickFactor = [1, 1, 1.6, 2.4][tier];
+  viewModel.setTier(tier);
+  cancelMining();
+
   renderHotbar();
   el.hudTier.textContent = `📚 ${tierName} — dig to ${objectives.total} glowing beacons`;
   updateHud();
@@ -143,20 +209,59 @@ function buildLevel(level) {
 }
 
 // ---- Mining / building ----
-function mine() {
-  if (!target) return;
-  const { x, y, z, id } = target.hit;
-  if (id === B.QUESTION) { openQuiz(); return; }
-  // collect the block if it's a placeable type
-  if (BLOCK_INFO[id]) state.inv[id] = (state.inv[id] || 0) + 1;
-  world.set(x, y, z, B.AIR);
+function cancelMining() {
+  mining = null;
+  crackStage = -1;
+  crackMesh.visible = false;
+}
+
+// Called every frame: hold left mouse on a block to break it over time.
+function updateMining(dt) {
+  if (!state.playing || quiz.isOpen() || !leftHeld || !target || target.hit.id === B.QUESTION) {
+    cancelMining();
+    return;
+  }
+  const h = target.hit;
+  if (!mining || mining.x !== h.x || mining.y !== h.y || mining.z !== h.z) {
+    mining = { x: h.x, y: h.y, z: h.z, id: h.id, progress: 0, swingTimer: 0 };
+  }
+  // break speed = base pickaxe speed × how good the held tool is for this block
+  const sel = HOTBAR[state.selected];
+  const selTool = sel.kind === 'tool' ? sel.id : T.HAND;
+  mining.progress += dt * state.pickFactor * toolFactor(selTool, h.id) / hardness(h.id);
+
+  // keep swinging + a soft dig tick
+  mining.swingTimer -= dt;
+  if (mining.swingTimer <= 0) { viewModel.swing(); Sfx.mine(); mining.swingTimer = 0.3; }
+
+  // crack overlay
+  const stage = Math.max(0, Math.min(9, Math.floor(mining.progress * 10)));
+  crackMesh.position.set(h.x + 0.5, h.y + 0.5, h.z + 0.5);
+  crackMesh.visible = true;
+  if (stage !== crackStage) {
+    crackStage = stage;
+    crackMesh.material.map = getCrackTexture(stage);
+    crackMesh.material.needsUpdate = true;
+  }
+
+  if (mining.progress >= 1) breakBlock(h);
+}
+
+function breakBlock(h) {
+  if (BLOCK_INFO[h.id]) state.inv[h.id] = (state.inv[h.id] || 0) + 1; // collect
+  spawnParticles(h.x + 0.5, h.y + 0.5, h.z + 0.5, BLOCK_INFO[h.id] ? BLOCK_INFO[h.id].color : '#888888');
+  Sfx.breakBlock();
+  world.set(h.x, h.y, h.z, B.AIR);
   world.rebuild();
   renderHotbar();
+  cancelMining(); // will re-target / re-start on the next block while held
 }
 
 function build() {
   if (!target) return;
-  const id = HOTBAR[state.selected];
+  const sel = HOTBAR[state.selected];
+  if (sel.kind !== 'block') { toast('Hold a block to build (keys 5–9)'); return; }
+  const id = sel.id;
   if ((state.inv[id] || 0) <= 0) { toast(`No ${BLOCK_INFO[id].name} left to place`); return; }
   const { x, y, z } = target.prev;
   if (world.get(x, y, z) !== B.AIR) return;
@@ -175,9 +280,8 @@ function overlapsPlayer(x, y, z) {
 }
 
 // ---- Quiz ----
-function openQuiz() {
-  if (!targetEntry || quiz.isOpen()) return;
-  const entry = targetEntry;
+function openQuiz(entry = targetEntry) {
+  if (!entry || quiz.isOpen()) return;
   releaseControl();
   quiz.open(entry.question, {
     onCorrect: () => {
@@ -192,12 +296,17 @@ function openQuiz() {
       world.rebuild();
       state.keys++;
       Sfx.collect();
+      // reward: unlock a stack of special glowing build blocks (more for streaks)
+      const rewardId = REWARD_BLOCKS[(state.keys - 1) % REWARD_BLOCKS.length];
+      const amount = 3 + Math.min(state.streak, 5);
+      state.inv[rewardId] = (state.inv[rewardId] || 0) + amount;
+      renderHotbar();
       updateHud();
       if (objectives.solvedCount >= objectives.total) {
         toast('🌟 Portal unlocked! Head to the center!', 2600);
         Sfx.portal();
       } else {
-        toast(`🔑 Key collected! ${state.keys}/${state.keysTotal}`);
+        toast(`🔑 Key + ${amount} ${BLOCK_INFO[rewardId].name} blocks to build with!`, 2400);
       }
       resumeControl();
     },
@@ -236,7 +345,7 @@ function startGame() {
   state.playing = true;
   player.setEnabled(true);
   player.requestLock();
-  toast('⛏️ Left-click to mine • right-click to build • dig to the beacons!', 3600);
+  toast('⛏️ Pick a tool (1–4) • left-click mine • right-click build • dig to the beacons!', 4200);
 }
 
 function nextLevel() {
@@ -285,10 +394,17 @@ renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
 renderer.domElement.addEventListener('mousedown', (e) => {
   if (!state.playing || quiz.isOpen()) return;
   if (!player.locked) { player.requestLock(); return; }
-  viewModel.swing();
-  if (e.button === 0) mine();        // left click
-  else if (e.button === 2) build();  // right click
+  if (e.button === 0) {
+    // left: click an uncovered question to answer; otherwise hold to mine
+    if (target && target.hit.id === B.QUESTION) { viewModel.swing(); openQuiz(); }
+    else { leftHeld = true; viewModel.swing(); }
+  } else if (e.button === 2) {
+    viewModel.swing();
+    build();   // right: place a block (instant)
+  }
 });
+window.addEventListener('mouseup', (e) => { if (e.button === 0) { leftHeld = false; cancelMining(); } });
+document.addEventListener('pointerlockchange', () => { if (!document.pointerLockElement) { leftHeld = false; cancelMining(); } });
 
 // ---- Resize ----
 window.addEventListener('resize', () => {
@@ -310,6 +426,7 @@ function animate() {
   const k = player.keys;
   const moving = state.playing && player.onGround && (k['KeyW'] || k['KeyA'] || k['KeyS'] || k['KeyD']);
   viewModel.update(dt, !!moving);
+  updateParticles(dt);
 
   if (objectives && state.playing) {
     objectives.update(dt, t);
@@ -318,6 +435,8 @@ function animate() {
     target = quiz.isOpen() ? null : world.raycast(player.eyePosition(), player.forward(), 6);
     targetEntry = (target && target.hit.id === B.QUESTION)
       ? objectives.getQuestionAt(target.hit.x, target.hit.y, target.hit.z) : null;
+
+    updateMining(dt);
 
     if (target) {
       highlight.position.set(target.hit.x + 0.5, target.hit.y + 0.5, target.hit.z + 0.5);
@@ -354,7 +473,9 @@ window.WordCraft = {
   player, quiz, scene, viewModel,
   get target() { return target; },
   get targetEntry() { return targetEntry; },
-  mine, build,
+  build, breakBlock, openQuiz,
+  mineTarget() { if (target && target.hit.id !== B.QUESTION) breakBlock(target.hit); },
+  answerNearest() { const e = objectives.entries.find((x) => !x.solved); if (e) openQuiz(e); return !!e; },
   digToFirstQuestion() {
     const e = objectives && objectives.entries.find((x) => !x.solved);
     if (!e) return false;

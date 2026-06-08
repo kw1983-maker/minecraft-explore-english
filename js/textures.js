@@ -138,9 +138,99 @@ export function getBlockMaterials(type) {
     case 'leaves':
       mats = blockMaterials({ top: BlockTex.leaves(), side: BlockTex.leaves() });
       break;
+    // ---- special reward blocks: solid, glowing colours ----
+    case 'glow':
+      mats = solidGlow(0xffd23f, 0xffaa00, 0.75);
+      break;
+    case 'ruby':
+      mats = solidGlow(0xe0444f, 0xaa1822, 0.55);
+      break;
+    case 'sapphire':
+      mats = solidGlow(0x4a6fe0, 0x1828aa, 0.55);
+      break;
     default:
       mats = blockMaterials({ top: BlockTex.dirt(), side: BlockTex.dirt() });
   }
   matCache[type] = mats;
   return mats;
+}
+
+// A solid emissive material set (used for the glowing reward blocks).
+function solidGlow(color, emissive, intensity) {
+  const m = new THREE.MeshLambertMaterial({ color, emissive, emissiveIntensity: intensity });
+  return [m, m, m, m, m, m];
+}
+
+// ---- Hotbar tool icons ----
+// Tiny drawn icons for the tool slots (returned as data URLs for CSS
+// background-image). Drawn rather than emoji so they look the same everywhere.
+const _toolIcons = {};
+export function getToolIcon(toolId) {
+  if (_toolIcons[toolId]) return _toolIcons[toolId];
+  const S = 32;
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const ctx = c.getContext('2d');
+  const WOODC = '#7a542a', METAL = '#c9ccd6', GOLD = '#ffd23f';
+  const r = (x, y, w, h, col) => { ctx.fillStyle = col; ctx.fillRect(x, y, w, h); };
+  ctx.save();
+  ctx.translate(S / 2, S / 2);
+  ctx.rotate(-Math.PI / 4); // hold the tool on a diagonal
+  switch (toolId) {
+    case 1: // pickaxe
+      r(-2, -6, 4, 19, WOODC);
+      r(-11, -13, 22, 4, METAL);
+      r(-2, -9, 4, 3, METAL);
+      break;
+    case 2: // axe
+      r(-2, -6, 4, 19, WOODC);
+      r(2, -14, 10, 12, METAL);
+      break;
+    case 3: // shovel
+      r(-2, -4, 4, 17, WOODC);
+      r(-5, -15, 10, 11, METAL);
+      break;
+    case 4: // sword
+      r(-2, -14, 4, 19, METAL);
+      r(-8, 5, 16, 3, GOLD);
+      r(-2, 8, 4, 6, WOODC);
+      r(-3, 14, 6, 2, GOLD);
+      break;
+    default:
+      r(-2, -6, 4, 19, WOODC);
+  }
+  ctx.restore();
+  const url = c.toDataURL();
+  _toolIcons[toolId] = url;
+  return url;
+}
+
+// Crack-overlay textures for the hold-to-mine effect (stages 0..9). Transparent
+// background so only the crack lines show on top of the block being mined.
+const _crack = {};
+export function getCrackTexture(stage) {
+  if (_crack[stage]) return _crack[stage];
+  const c = document.createElement('canvas');
+  c.width = c.height = 16;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, 16, 16);
+  ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+  ctx.lineWidth = 1;
+  const rng = mulberry32(1234);
+  const lines = 1 + stage;            // more cracks as it breaks
+  for (let i = 0; i < lines; i++) {
+    let x = 8, y = 8;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    const steps = 2 + stage;
+    for (let s = 0; s < steps; s++) {
+      x = Math.max(0, Math.min(16, x + Math.floor((rng() - 0.5) * 7)));
+      y = Math.max(0, Math.min(16, y + Math.floor((rng() - 0.5) * 7)));
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  const t = texFromCanvas(c);
+  _crack[stage] = t;
+  return t;
 }

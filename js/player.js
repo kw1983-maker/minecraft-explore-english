@@ -119,15 +119,27 @@ export class Player {
     // gravity
     this.vel.y -= GRAVITY * dt;
 
-    // ---- move + resolve, axis by axis ----
+    // ---- move + resolve, axis by axis (with auto step-up over 1-block ledges) ----
     // X
     let nx = this.pos.x + vx * dt;
     nx = Math.max(HALF, Math.min(WORLD_SIZE - HALF, nx));
     if (!this._collides(nx, this.pos.y, this.pos.z)) this.pos.x = nx;
+    else if (vx !== 0 && this.onGround) {
+      const sy = Math.floor(this.pos.y) + 1;                 // top of the ledge
+      if (sy - this.pos.y <= 1.01 && !this._collides(nx, sy, this.pos.z)) {
+        this.pos.x = nx; this.pos.y = sy;                    // step up
+      }
+    }
     // Z
     let nz = this.pos.z + vz * dt;
     nz = Math.max(HALF, Math.min(WORLD_SIZE - HALF, nz));
     if (!this._collides(this.pos.x, this.pos.y, nz)) this.pos.z = nz;
+    else if (vz !== 0 && this.onGround) {
+      const sy = Math.floor(this.pos.y) + 1;
+      if (sy - this.pos.y <= 1.01 && !this._collides(this.pos.x, sy, nz)) {
+        this.pos.z = nz; this.pos.y = sy;
+      }
+    }
     // Y
     const ny = this.pos.y + this.vel.y * dt;
     if (!this._collides(this.pos.x, ny, this.pos.z)) {

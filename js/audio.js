@@ -57,6 +57,15 @@ export const Sfx = {
   click() {
     tone(600, 0, 0.05, 'square', 0.08);
   },
+  // soft "tok" while digging
+  mine() {
+    tone(180 + Math.random() * 40, 0, 0.06, 'triangle', 0.07);
+  },
+  // crunchy "crack" when a block breaks
+  breakBlock() {
+    tone(140, 0, 0.1, 'sawtooth', 0.12);
+    tone(90, 0.04, 0.14, 'square', 0.1);
+  },
 };
 
 // ---------------------------------------------------------------------------
