@@ -277,6 +277,11 @@ kbd {
 .unit-btn .unit-name { font-size: 14px; font-weight: bold; color: var(--gold); }
 .unit-btn .unit-blurb { font-size: 11px; color: #b8b8d4; line-height: 1.3; }
 
+/* compact variant (world picker): emoji + name only, five fit in one row */
+.unit-btn.compact { width: 92px; padding: 8px 4px; }
+.unit-btn.compact .unit-emoji { font-size: 22px; }
+.unit-btn.compact .unit-name { font-size: 12px; }
+
 .btn-big {
   font-family: inherit;
   font-size: 22px;
@@ -374,4 +379,5 @@ kbd {
   .quiz-options { grid-template-columns: 1fr; }
   .how { grid-template-columns: 1fr; }
   .unit-btn { width: 100%; }
+  .unit-btn.compact { width: calc(33.3% - 8px); }
 }

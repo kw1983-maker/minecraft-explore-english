@@ -291,6 +291,11 @@ kbd {
 .unit-btn .unit-name { font-size: 14px; font-weight: bold; color: var(--gold); }
 .unit-btn .unit-blurb { font-size: 11px; color: #b8b8d4; line-height: 1.3; }
 
+/* compact variant (world picker): emoji + name only, five fit in one row */
+.unit-btn.compact { width: 92px; padding: 8px 4px; }
+.unit-btn.compact .unit-emoji { font-size: 22px; }
+.unit-btn.compact .unit-name { font-size: 12px; }
+
 .btn-big {
   font-family: inherit;
   font-size: 22px;
@@ -388,6 +393,7 @@ kbd {
   .quiz-options { grid-template-columns: 1fr; }
   .how { grid-template-columns: 1fr; }
   .unit-btn { width: 100%; }
+  .unit-btn.compact { width: calc(33.3% - 8px); }
 }
 
   </style>
@@ -438,6 +444,8 @@ kbd {
       <p class="mission">🎯 <b>Mission:</b> Dig down to the glowing beacons to uncover buried question blocks, answer correctly to collect keys, build whatever you like along the way, then open the portal to advance!</p>
       <p class="unit-label">📚 Choose your unit:</p>
       <div id="unit-picker" class="unit-picker"></div>
+      <p class="unit-label">🌍 Choose your world:</p>
+      <div id="dim-picker" class="unit-picker"></div>
       <button id="btn-play" class="btn-big">▶ Click to Play</button>
       <p class="hint-text">Tip: click the screen any time to re-capture the mouse.</p>
     </div>
@@ -519,6 +527,13 @@ function makeNoisyCanvas(base, speckle, seed, opts = {}) {
       ctx.fillRect(x, 0, 1, h);
     }
   }
+  if (opts.stripes) {
+    // vertical darker ribs (cactus-side look)
+    for (let x = 1; x < SIZE; x += 4) {
+      ctx.fillStyle = opts.stripes;
+      ctx.fillRect(x, 0, 1, SIZE);
+    }
+  }
   return c;
 }
 
@@ -566,6 +581,16 @@ const BlockTex = {
     makeNoisyCanvas('#3f8a2e', ['#347526', '#4aa036', '#2c6620'], 18, { density: 0.7 })),
   water: () => tex('water', () =>
     makeNoisyCanvas('#2f6fd8', ['#2a64c4', '#3a7ce8'], 19, { density: 0.3 })),
+  snow: () => tex('snow', () =>
+    makeNoisyCanvas('#f4f8fc', ['#e8eef6', '#ffffff', '#dde6f0'], 20, { density: 0.4 })),
+  ice: () => tex('ice', () =>
+    makeNoisyCanvas('#a8d4ee', ['#98c8e6', '#bce0f6', '#8cbede'], 21, { density: 0.35 })),
+  cactusSide: () => tex('cactusSide', () =>
+    makeNoisyCanvas('#3e8f3e', ['#357f35', '#4aa04a', '#2c702c'], 22, { density: 0.5, stripes: '#2a662a' })),
+  cactusTop: () => tex('cactusTop', () =>
+    makeNoisyCanvas('#4aa04a', ['#3e8f3e', '#58b058'], 23, { density: 0.5 })),
+  basalt: () => tex('basalt', () =>
+    makeNoisyCanvas('#3a3a42', ['#2e2e36', '#46464f', '#26262c'], 24, { density: 0.55 })),
 };
 
 // Glowing "?" texture + materials for question blocks.
@@ -617,6 +642,21 @@ function getBlockMaterials(type) {
       break;
     case 'leaves':
       mats = blockMaterials({ top: BlockTex.leaves(), side: BlockTex.leaves() });
+      break;
+    case 'snow':
+      mats = blockMaterials({ top: BlockTex.snow(), side: BlockTex.snow() });
+      break;
+    case 'ice': {
+      // slightly see-through so frozen water reads as ice
+      const m = new THREE.MeshLambertMaterial({ map: BlockTex.ice(), transparent: true, opacity: 0.9 });
+      mats = [m, m, m, m, m, m];
+      break;
+    }
+    case 'cactus':
+      mats = blockMaterials({ top: BlockTex.cactusTop(), side: BlockTex.cactusSide(), bottom: BlockTex.cactusTop() });
+      break;
+    case 'basalt':
+      mats = blockMaterials({ top: BlockTex.basalt(), side: BlockTex.basalt() });
       break;
     // ---- special reward blocks: solid, glowing colours ----
     case 'glow':
@@ -714,6 +754,104 @@ function getCrackTexture(stage) {
   _crack[stage] = t;
   return t;
 }
+
+// ===== js/dimensions.js =====
+// World themes ("dimensions") the player picks on the start screen.
+// Pure data — block layers are texture/block NAMES resolved to ids by
+// world.js (ID_BY_NAME), so this file imports nothing and adding a new
+// world later only means appending one object here and running build.py.
+// Each dimension:
+//   sky          hex color for background + fog
+//   fog          [near, far] fog distances
+//   liquid       { color, opacity, emissive? } — the flat plane at WATER_LEVEL
+//   blocks       { surface, soil, deep, beach } terrain layers (block names)
+//   tree         'oak' | 'fir' | 'jungle' | 'cactus' | 'glowrock'
+//   treeDensity  chance per dry column of growing one
+//   terrain      { base, relief, cone? } heightmap shape: base lift above the
+//                water level, relief = hill strength, cone = extra height
+//                rising toward the island center (volcano)
+//   structures   building types scattered on the island; the first one is
+//                also anchored over a buried question block
+//                ('house' | 'tower' | 'well' | 'pyramid' | 'igloo' | 'ruin' | 'spire')
+//   hotbar       3 block names for the buildable hotbar slots (+ rewards)
+
+const DIMENSIONS = [
+  {
+    id: 'classic',
+    name: 'Classic',
+    emoji: '🏝️',
+    blurb: 'Green island & oak trees',
+    sky: 0x87ceeb,
+    fog: [34, 80],
+    liquid: { color: 0x2f6fd8, opacity: 0.72 },
+    blocks: { surface: 'grass', soil: 'dirt', deep: 'stone', beach: 'sand' },
+    tree: 'oak',
+    treeDensity: 0.03,
+    terrain: { base: 2, relief: 9 },
+    structures: ['house', 'tower', 'well'],
+    hotbar: ['stone', 'wood', 'dirt'],
+  },
+  {
+    id: 'desert',
+    name: 'Desert',
+    emoji: '🏜️',
+    blurb: 'Sand dunes & cacti',
+    sky: 0xf5c97a,
+    fog: [28, 70],
+    liquid: { color: 0x3a86c8, opacity: 0.72 },
+    blocks: { surface: 'sand', soil: 'sand', deep: 'stone', beach: 'sand' },
+    tree: 'cactus',
+    treeDensity: 0.02,
+    terrain: { base: 3, relief: 4 },           // low rolling dunes
+    structures: ['pyramid', 'house', 'well'],
+    hotbar: ['sand', 'stone', 'wood'],
+  },
+  {
+    id: 'snowy',
+    name: 'Snowy',
+    emoji: '❄️',
+    blurb: 'Snow, ice & fir trees',
+    sky: 0xdce9f5,
+    fog: [30, 75],
+    liquid: { color: 0xbfe0f0, opacity: 0.9 },
+    blocks: { surface: 'snow', soil: 'dirt', deep: 'stone', beach: 'ice' },
+    tree: 'fir',
+    treeDensity: 0.035,
+    terrain: { base: 2, relief: 6 },           // gentle snowfields
+    structures: ['igloo', 'tower', 'house'],
+    hotbar: ['snow', 'ice', 'wood'],
+  },
+  {
+    id: 'jungle',
+    name: 'Jungle',
+    emoji: '🌴',
+    blurb: 'Tall trees & teal water',
+    sky: 0x9fd8a0,
+    fog: [22, 60],
+    liquid: { color: 0x2a9d8f, opacity: 0.75 },
+    blocks: { surface: 'grass', soil: 'dirt', deep: 'stone', beach: 'sand' },
+    tree: 'jungle',
+    treeDensity: 0.07,
+    terrain: { base: 3, relief: 11 },          // steep overgrown hills
+    structures: ['ruin', 'house', 'well'],
+    hotbar: ['wood', 'leaves', 'dirt'],
+  },
+  {
+    id: 'volcano',
+    name: 'Volcano',
+    emoji: '🌋',
+    blurb: 'Dark rock & glowing lava',
+    sky: 0x3a2026,
+    fog: [24, 65],
+    liquid: { color: 0xff5a1f, opacity: 1, emissive: 0xff3300 },
+    blocks: { surface: 'basalt', soil: 'basalt', deep: 'basalt', beach: 'basalt' },
+    tree: 'glowrock',
+    treeDensity: 0.02,
+    terrain: { base: 1, relief: 7, cone: 12 }, // a cone rising to the center
+    structures: ['spire', 'tower', 'ruin'],
+    hotbar: ['basalt', 'stone', 'glow'],
+  },
+];
 
 // ===== js/audio.js =====
 // Tiny WebAudio sound-effect engine. All sounds are synthesized in code,
@@ -1112,12 +1250,19 @@ const B = {
   AIR: 0, GRASS: 1, DIRT: 2, STONE: 3, SAND: 4, WOOD: 5, LEAVES: 6, QUESTION: 7,
   // special reward blocks (unlocked by answering questions correctly)
   GLOW: 8, RUBY: 9, SAPPHIRE: 10,
+  // dimension-themed blocks
+  SNOW: 11, ICE: 12, CACTUS: 13, BASALT: 14,
 };
 // id -> texture/material name (for getBlockMaterials)
 const NAME = {
   1: 'grass', 2: 'dirt', 3: 'stone', 4: 'sand', 5: 'wood', 6: 'leaves',
   8: 'glow', 9: 'ruby', 10: 'sapphire',
+  11: 'snow', 12: 'ice', 13: 'cactus', 14: 'basalt',
 };
+// name -> id, so dimension configs can reference blocks by name
+const ID_BY_NAME = Object.fromEntries(
+  Object.entries(NAME).map(([id, name]) => [name, Number(id)])
+);
 // Which ids the player can collect/place and a friendly label + hotbar colour.
 const BLOCK_INFO = {
   [B.GRASS]:    { name: 'Grass',    color: '#6abe30' },
@@ -1129,6 +1274,10 @@ const BLOCK_INFO = {
   [B.GLOW]:     { name: 'Glowstone', color: '#ffd23f', reward: true },
   [B.RUBY]:     { name: 'Ruby',      color: '#e0444f', reward: true },
   [B.SAPPHIRE]: { name: 'Sapphire',  color: '#4a6fe0', reward: true },
+  [B.SNOW]:     { name: 'Snow',     color: '#f4f8fc' },
+  [B.ICE]:      { name: 'Ice',      color: '#a8d4ee' },
+  [B.CACTUS]:   { name: 'Cactus',   color: '#3e8f3e' },
+  [B.BASALT]:   { name: 'Basalt',   color: '#3a3a42' },
 };
 
 // How long each block takes to break (seconds with the base pickaxe).
@@ -1136,6 +1285,7 @@ const HARDNESS = {
   [B.GRASS]: 0.45, [B.DIRT]: 0.45, [B.SAND]: 0.35, [B.LEAVES]: 0.25,
   [B.WOOD]: 0.9, [B.STONE]: 1.5,
   [B.GLOW]: 1.1, [B.RUBY]: 1.3, [B.SAPPHIRE]: 1.3,
+  [B.SNOW]: 0.3, [B.ICE]: 0.9, [B.CACTUS]: 0.5, [B.BASALT]: 1.6,
 };
 function hardness(id) { return HARDNESS[id] ?? 0.6; }
 
@@ -1144,10 +1294,10 @@ function hardness(id) { return HARDNESS[id] ?? 0.6; }
 // material much faster. HAND is the implicit "no tool" (a block is selected).
 const T = { HAND: 0, PICKAXE: 1, AXE: 2, SHOVEL: 3, SWORD: 4 };
 const TOOL_INFO = {
-  [T.PICKAXE]: { name: 'Pickaxe', good: [B.STONE, B.GLOW, B.RUBY, B.SAPPHIRE] },
-  [T.AXE]:     { name: 'Axe',     good: [B.WOOD, B.LEAVES] },
-  [T.SHOVEL]:  { name: 'Shovel',  good: [B.DIRT, B.GRASS, B.SAND] },
-  [T.SWORD]:   { name: 'Sword',   good: [B.LEAVES] }, // fast swing, snips leaves/plants
+  [T.PICKAXE]: { name: 'Pickaxe', good: [B.STONE, B.GLOW, B.RUBY, B.SAPPHIRE, B.ICE, B.BASALT] },
+  [T.AXE]:     { name: 'Axe',     good: [B.WOOD, B.LEAVES, B.CACTUS] },
+  [T.SHOVEL]:  { name: 'Shovel',  good: [B.DIRT, B.GRASS, B.SAND, B.SNOW] },
+  [T.SWORD]:   { name: 'Sword',   good: [B.LEAVES, B.CACTUS] }, // fast swing, snips leaves/plants
 };
 // 3x on a matching material, 1x otherwise / by hand. No penalty — kind to beginners.
 function toolFactor(toolId, blockId) {
@@ -1178,15 +1328,23 @@ function makeNoise(seed) {
 }
 
 class World {
-  constructor(seed = 1) {
+  constructor(seed = 1, dim = DIMENSIONS[0]) {
     this.seed = seed >>> 0;
+    this.dim = dim;
+    // resolve the dimension's terrain layer names to block ids once
+    this.layers = {
+      surface: ID_BY_NAME[dim.blocks.surface],
+      soil: ID_BY_NAME[dim.blocks.soil],
+      deep: ID_BY_NAME[dim.blocks.deep],
+      beach: ID_BY_NAME[dim.blocks.beach],
+    };
     this.voxels = new Uint8Array(WORLD_SIZE * WORLD_HEIGHT * WORLD_SIZE);
     this.group = new THREE.Group();
     this.blockGroup = new THREE.Group();
     this.group.add(this.blockGroup);
     this.structures = []; // footprints { x, z, r } of placed buildings
     this._generate();
-    this._addWater();
+    this._addLiquid();
   }
 
   idx(x, y, z) { return (y * WORLD_SIZE + z) * WORLD_SIZE + x; }
@@ -1230,20 +1388,36 @@ class World {
         const dx = (x - cx) / maxR, dz = (z - cz) / maxR;
         const dist = Math.sqrt(dx * dx + dz * dz);
         const fall = Math.max(0, 1 - dist * dist * 1.15);
-        let h = Math.round(WATER_LEVEL + 2 + n * 9 * fall - (1 - fall) * 7);
+        const terr = this.dim.terrain;
+        let h = Math.round(WATER_LEVEL + terr.base + n * terr.relief * fall - (1 - fall) * 7);
+        if (terr.cone) h += Math.round(terr.cone * Math.max(0, 1 - dist * 2.2));
         h = Math.max(2, Math.min(WORLD_HEIGHT - 6, h));
         const sandy = h <= WATER_LEVEL + 1;
+        const L = this.layers;
 
         for (let y = 0; y < h; y++) {
           let id;
-          if (y === h - 1) id = sandy ? B.SAND : B.GRASS;
-          else if (y >= h - 3) id = sandy ? B.SAND : B.DIRT;
-          else id = B.STONE;
+          if (y === h - 1) id = sandy ? L.beach : L.surface;
+          else if (y >= h - 3) id = sandy ? L.beach : L.soil;
+          else id = L.deep;
           this.set(x, y, z, id);
         }
-        // trees on dry grass
-        if (!sandy && treeRng() < 0.03) this._tree(x, h, z, treeRng);
+        // themed vegetation on dry land (keep the central spawn/portal area clear)
+        if (!sandy && treeRng() < this.dim.treeDensity && Math.hypot(x - cx, z - cz) > 6) {
+          this._growTree(x, h, z, treeRng);
+        }
       }
+    }
+  }
+
+  // Dispatch to the dimension's vegetation type.
+  _growTree(x, baseY, z, rng) {
+    switch (this.dim.tree) {
+      case 'fir': return this._fir(x, baseY, z, rng);
+      case 'jungle': return this._jungleTree(x, baseY, z, rng);
+      case 'cactus': return this._cactus(x, baseY, z, rng);
+      case 'glowrock': return this._glowRock(x, baseY, z, rng);
+      default: return this._tree(x, baseY, z, rng);
     }
   }
 
@@ -1257,6 +1431,47 @@ class World {
         if (Math.abs(dx) + Math.abs(dz) <= 1) this.set(x + dx, top + 1, z + dz, B.LEAVES);
       }
     this.set(x, top + 1, z, B.LEAVES);
+  }
+
+  // Tall narrow conifer: layered leaves narrowing to a spike.
+  _fir(x, baseY, z, rng) {
+    const trunk = 4 + Math.floor(rng() * 2);
+    for (let i = 0; i < trunk; i++) this.set(x, baseY + i, z, B.WOOD);
+    const top = baseY + trunk;
+    for (let dx = -1; dx <= 1; dx++)
+      for (let dz = -1; dz <= 1; dz++) this.set(x + dx, top - 2, z + dz, B.LEAVES);
+    for (const [dx, dz] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) this.set(x + dx, top - 1, z + dz, B.LEAVES);
+    this.set(x, top, z, B.LEAVES);
+    this.set(x, top + 1, z, B.SNOW); // snowy tip
+  }
+
+  // Big jungle tree: tall trunk, wide two-layer canopy.
+  _jungleTree(x, baseY, z, rng) {
+    const trunk = 5 + Math.floor(rng() * 3);
+    for (let i = 0; i < trunk; i++) this.set(x, baseY + i, z, B.WOOD);
+    const top = baseY + trunk;
+    for (let dx = -2; dx <= 2; dx++)
+      for (let dz = -2; dz <= 2; dz++)
+        if (Math.abs(dx) + Math.abs(dz) <= 3) this.set(x + dx, top, z + dz, B.LEAVES);
+    for (let dx = -1; dx <= 1; dx++)
+      for (let dz = -1; dz <= 1; dz++) this.set(x + dx, top + 1, z + dz, B.LEAVES);
+    this.set(x, top + 2, z, B.LEAVES);
+  }
+
+  // Short cactus column.
+  _cactus(x, baseY, z, rng) {
+    const h = 2 + Math.floor(rng() * 2);
+    for (let i = 0; i < h; i++) this.set(x, baseY + i, z, B.CACTUS);
+  }
+
+  // Volcanic glow: a lone glowstone, sometimes atop a small basalt spike.
+  _glowRock(x, baseY, z, rng) {
+    if (rng() < 0.5) {
+      this.set(x, baseY, z, B.GLOW);
+    } else {
+      this.set(x, baseY, z, B.BASALT);
+      this.set(x, baseY + 1, z, B.GLOW);
+    }
   }
 
   // A solid block is drawn only if it has at least one air-facing side.
@@ -1309,10 +1524,16 @@ class World {
     }
   }
 
-  _addWater() {
+  // The flat liquid plane at WATER_LEVEL — water in most worlds, lava in the volcano.
+  _addLiquid() {
+    const L = this.dim.liquid;
     const geo = new THREE.PlaneGeometry(WORLD_SIZE + 8, WORLD_SIZE + 8);
     geo.rotateX(-Math.PI / 2);
-    const mat = new THREE.MeshLambertMaterial({ color: 0x2f6fd8, transparent: true, opacity: 0.72 });
+    const mat = new THREE.MeshLambertMaterial({ color: L.color, transparent: L.opacity < 1, opacity: L.opacity });
+    if (L.emissive) {
+      mat.emissive = new THREE.Color(L.emissive);
+      mat.emissiveIntensity = 0.6;
+    }
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(WORLD_SIZE / 2, WATER_LEVEL, WORLD_SIZE / 2);
     this.group.add(mesh);
@@ -1370,23 +1591,33 @@ class World {
   // over a buried question so digging through its floor uncovers it.
   addStructures(rng, count, opts = {}) {
     const entries = opts.entries || [];
+    const types = this.dim.structures;
     let placed = 0;
-    // Anchor a house over a buried question first, so findStructureSpots avoids it.
+    // Anchor the dimension's signature building over a buried question first,
+    // so findStructureSpots avoids it.
     if (entries.length && count > 0) {
       const e = entries[Math.floor(rng() * entries.length)];
-      this._house(e.x, e.z, this.surfaceY(e.x, e.z), rng);
+      this._buildStructure(types[0], e.x, e.z, this.surfaceY(e.x, e.z), rng);
       this.structures.push({ x: e.x, z: e.z, r: 4 });
       placed++;
     }
     // Scatter the rest on flat dry land.
-    const types = ['house', 'tower', 'well'];
     for (const s of this.findStructureSpots(count - placed, rng)) {
-      const g = this.surfaceY(s.x, s.z);
       const type = types[Math.floor(rng() * types.length)];
-      if (type === 'tower') this._tower(s.x, s.z, g, rng);
-      else if (type === 'well') this._well(s.x, s.z, g, rng);
-      else this._house(s.x, s.z, g, rng);
+      this._buildStructure(type, s.x, s.z, this.surfaceY(s.x, s.z), rng);
       this.structures.push({ x: s.x, z: s.z, r: 4 });
+    }
+  }
+
+  _buildStructure(type, x, z, g, rng) {
+    switch (type) {
+      case 'tower': return this._tower(x, z, g, rng);
+      case 'well': return this._well(x, z, g, rng);
+      case 'pyramid': return this._pyramid(x, z, g, rng);
+      case 'igloo': return this._igloo(x, z, g, rng);
+      case 'ruin': return this._ruin(x, z, g, rng);
+      case 'spire': return this._spire(x, z, g, rng);
+      default: return this._house(x, z, g, rng);
     }
   }
 
@@ -1422,7 +1653,7 @@ class World {
     for (let z = z0; z < z0 + d; z++)
       for (let x = x0; x < x0 + w; x++) {
         for (let y = 0; y < baseY; y++)
-          if (!this.isSolid(this.get(x, y, z))) this.set(x, y, z, y >= baseY - 1 ? B.DIRT : B.STONE);
+          if (!this.isSolid(this.get(x, y, z))) this.set(x, y, z, y >= baseY - 1 ? this.layers.soil : this.layers.deep);
         for (let y = baseY; y < WORLD_HEIGHT; y++) this.set(x, y, z, B.AIR);
       }
   }
@@ -1467,6 +1698,77 @@ class World {
     const topY = baseY + h;
     for (const [dx, dz] of [[0, 0], [2, 0], [0, 2], [2, 2]]) this.set(x0 + dx, topY, z0 + dz, B.STONE);
     this.set(cx, topY, cz, B.GLOW);
+  }
+
+  // A stepped 7x7 sand pyramid with a hollow treasure chamber and doorway.
+  _pyramid(cx, cz, g, rng) {
+    const x0 = cx - 3, z0 = cz - 3, baseY = g;
+    this._levelGround(x0, z0, 7, 7, baseY);
+    // solid stepped layers, shrinking by one ring per level
+    for (let lvl = 0; lvl < 4; lvl++) {
+      const r = 3 - lvl;
+      for (let dz = -r; dz <= r; dz++)
+        for (let dx = -r; dx <= r; dx++) this.set(cx + dx, baseY + lvl, cz + dz, B.SAND);
+    }
+    // hollow out a small chamber with loot
+    for (let dz = -1; dz <= 1; dz++)
+      for (let dx = -1; dx <= 1; dx++) this.set(cx + dx, baseY, cz + dz, B.AIR);
+    this.set(cx - 1, baseY, cz - 1, B.RUBY);
+    this.set(cx + 1, baseY, cz - 1, B.SAPPHIRE);
+    this.set(cx, baseY + 1, cz, B.GLOW); // chamber light (inside the 2nd layer)
+    // doorway on the south face + entry corridor toward the chamber
+    this.set(cx, baseY, z0 + 6, B.AIR);
+    this.set(cx, baseY, z0 + 5, B.AIR);
+  }
+
+  // A round-ish snow shelter with a glow lamp inside.
+  _igloo(cx, cz, g, rng) {
+    const x0 = cx - 2, z0 = cz - 2, baseY = g;
+    this._levelGround(x0, z0, 5, 5, baseY);
+    // walls (5x5 ring, corners trimmed for a rounded look), 2 high
+    for (let y = baseY; y <= baseY + 1; y++)
+      for (let dz = -2; dz <= 2; dz++)
+        for (let dx = -2; dx <= 2; dx++) {
+          const edge = Math.abs(dx) === 2 || Math.abs(dz) === 2;
+          if (edge && Math.abs(dx) + Math.abs(dz) < 4) this.set(cx + dx, y, cz + dz, B.SNOW);
+        }
+    // domed roof: full 3x3 plus a center cap
+    for (let dz = -1; dz <= 1; dz++)
+      for (let dx = -1; dx <= 1; dx++) this.set(cx + dx, baseY + 2, cz + dz, B.SNOW);
+    this.set(cx, baseY + 3, cz, B.ICE); // ice skylight
+    // doorway (2 tall so the player can walk in) + lamp
+    this.set(cx, baseY, z0 + 4, B.AIR);
+    this.set(cx, baseY + 1, z0 + 4, B.AIR);
+    this.set(cx - 1, baseY, cz - 1, B.GLOW);
+  }
+
+  // Crumbling overgrown walls — a lost jungle temple.
+  _ruin(cx, cz, g, rng) {
+    const x0 = cx - 2, z0 = cz - 2, baseY = g;
+    this._levelGround(x0, z0, 5, 5, baseY);
+    for (let dz = -2; dz <= 2; dz++)
+      for (let dx = -2; dx <= 2; dx++) {
+        if (Math.abs(dx) !== 2 && Math.abs(dz) !== 2) continue; // walls only
+        if (rng() < 0.25) continue;                             // collapsed gaps
+        const h = 1 + Math.floor(rng() * 3);
+        for (let y = 0; y < h; y++) this.set(cx + dx, baseY + y, cz + dz, B.STONE);
+        if (rng() < 0.4) this.set(cx + dx, baseY + h, cz + dz, B.LEAVES); // overgrowth
+      }
+    // mossy floor + a forgotten treasure
+    for (let dz = -1; dz <= 1; dz++)
+      for (let dx = -1; dx <= 1; dx++) this.set(cx + dx, baseY - 1, cz + dz, B.STONE);
+    this.set(cx, baseY, cz, rng() < 0.5 ? B.RUBY : B.SAPPHIRE);
+  }
+
+  // A jagged 2x2 basalt spire crowned with glowstone — volcanic landmark.
+  _spire(cx, cz, g, rng) {
+    this._levelGround(cx - 1, cz - 1, 2, 2, g);
+    const h = 4 + Math.floor(rng() * 4);
+    for (const [dx, dz] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+      const colH = h - Math.floor(rng() * 3); // uneven jagged tops
+      for (let y = 0; y < colH; y++) this.set(cx - 1 + dx, g + y, cz - 1 + dz, B.BASALT);
+      if (rng() < 0.75) this.set(cx - 1 + dx, g + colH, cz - 1 + dz, B.GLOW);
+    }
   }
 
   // A small stone well with wooden posts and a leaf canopy.
@@ -2165,6 +2467,7 @@ const REWARD_BLOCKS = [B.GLOW, B.RUBY, B.SAPPHIRE];
 const state = {
   level: 1, score: 0, streak: 0, bestStreak: 0,
   unitIdx: 0,               // which textbook unit was picked on the start screen
+  dimIdx: 0,                // which world (dimension) was picked on the start screen
   keys: 0, keysTotal: 0, playing: false,
   inv: {}, selected: 0,     // start holding the Pickaxe
   pickFactor: 1,            // base mining speed multiplier (rises with level)
@@ -2280,9 +2583,16 @@ function buildLevel(level) {
   if (objectives) objectives.dispose();
   if (world) { scene.remove(world.group); world.dispose(); }
 
-  const seed = (level * 92821 + 7) >>> 0;
-  world = new World(seed);                  // generates voxels
+  const dim = DIMENSIONS[state.dimIdx];
+  const seed = ((level * 92821 + 7) ^ (state.dimIdx * 131071)) >>> 0;
+  world = new World(seed, dim);             // generates voxels
   scene.add(world.group);
+
+  // themed sky + fog
+  scene.background.set(dim.sky);
+  scene.fog.color.set(dim.sky);
+  scene.fog.near = dim.fog[0];
+  scene.fog.far = dim.fog[1];
 
   const unit = UNITS[state.unitIdx];
   const count = Math.min(3 + level, 6);
@@ -2298,9 +2608,12 @@ function buildLevel(level) {
 
   state.keys = 0;
   state.keysTotal = objectives.total;
+  // the hotbar's 3 buildable slots come from the dimension
+  const dimBlocks = dim.hotbar.map((n) => ID_BY_NAME[n]);
+  HOTBAR.splice(4, 3, ...dimBlocks.map((id) => ({ kind: 'block', id })));
   // starter blocks so you can build right away (plus whatever you mine)
   state.inv = {
-    [B.GRASS]: 0, [B.DIRT]: 0, [B.STONE]: 20, [B.SAND]: 0, [B.WOOD]: 10, [B.LEAVES]: 0,
+    [dimBlocks[0]]: 20, [dimBlocks[1]]: 10, [dimBlocks[2]]: 0,
     [B.GLOW]: 0, [B.RUBY]: 0, [B.SAPPHIRE]: 0,
   };
   // pickaxe tier rises with level (wood -> stone -> iron), mining faster each time
@@ -2310,7 +2623,7 @@ function buildLevel(level) {
   cancelMining();
 
   renderHotbar();
-  el.hudTier.textContent = `📚 ${unit.name}: ${stageName} — dig to ${objectives.total} glowing beacons`;
+  el.hudTier.textContent = `${dim.emoji} ${dim.name} • 📚 ${unit.name}: ${stageName} — dig to ${objectives.total} glowing beacons`;
   updateHud();
   setTimeout(() => el.loading.classList.add('hidden'), 150);
 }
@@ -2439,28 +2752,34 @@ function completeLevel() {
   el.levelend.classList.remove('hidden');
 }
 
-// ---- Unit picker (start screen) ----
-// Buttons are generated from UNITS so adding a unit in questions.js is enough.
-const unitPicker = document.getElementById('unit-picker');
-function renderUnitPicker() {
-  unitPicker.innerHTML = '';
-  UNITS.forEach((u, i) => {
+// ---- Start-screen pickers (unit + world) ----
+// Buttons are generated from data (UNITS / DIMENSIONS), so adding an entry
+// in questions.js or dimensions.js is enough — no UI changes needed.
+function renderPicker(container, items, selIdx, onPick, compact) {
+  container.innerHTML = '';
+  items.forEach((it, i) => {
     const b = document.createElement('button');
-    b.className = 'unit-btn' + (i === state.unitIdx ? ' sel' : '');
+    b.className = 'unit-btn' + (compact ? ' compact' : '') + (i === selIdx ? ' sel' : '');
     b.innerHTML =
-      `<span class="unit-emoji">${u.emoji}</span>` +
-      `<span class="unit-name">${u.name}</span>` +
-      `<span class="unit-blurb">${u.blurb}</span>`;
+      `<span class="unit-emoji">${it.emoji}</span>` +
+      `<span class="unit-name">${it.name}</span>` +
+      (compact ? '' : `<span class="unit-blurb">${it.blurb}</span>`);
+    if (compact) b.title = it.blurb;
     b.addEventListener('click', () => {
-      state.unitIdx = i;
       Sfx.unlock();
       Sfx.click();
-      renderUnitPicker();
+      onPick(i);
     });
-    unitPicker.appendChild(b);
+    container.appendChild(b);
   });
 }
-renderUnitPicker();
+function renderPickers() {
+  renderPicker(document.getElementById('unit-picker'), UNITS, state.unitIdx,
+    (i) => { state.unitIdx = i; renderPickers(); });
+  renderPicker(document.getElementById('dim-picker'), DIMENSIONS, state.dimIdx,
+    (i) => { state.dimIdx = i; renderPickers(); }, true);
+}
+renderPickers();
 
 // ---- Start / next ----
 function startGame() {
