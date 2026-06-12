@@ -6,7 +6,7 @@ import { World, WORLD_SIZE, B, BLOCK_INFO, hardness, T, TOOL_INFO, toolFactor } 
 import { Player } from './player.js';
 import { Objectives } from './objectives.js';
 import { Quiz } from './quiz.js';
-import { pickQuestions, TIERS } from './questions.js';
+import { pickQuestions, UNITS } from './questions.js';
 import { Sfx, Music } from './audio.js';
 import { ViewModel } from './viewmodel.js';
 import { getCrackTexture, getToolIcon } from './textures.js';
@@ -56,6 +56,7 @@ const HOTBAR = [
 const REWARD_BLOCKS = [B.GLOW, B.RUBY, B.SAPPHIRE];
 const state = {
   level: 1, score: 0, streak: 0, bestStreak: 0,
+  unitIdx: 0,               // which textbook unit was picked on the start screen
   keys: 0, keysTotal: 0, playing: false,
   inv: {}, selected: 0,     // start holding the Pickaxe
   pickFactor: 1,            // base mining speed multiplier (rises with level)
@@ -166,8 +167,6 @@ function renderHotbar() {
 }
 
 // ---- Level building ----
-function tierForLevel(level) { return Math.min(level - 1, TIERS.length - 1); }
-
 function buildLevel(level) {
   el.loading.classList.remove('hidden');
   if (objectives) objectives.dispose();
@@ -177,9 +176,9 @@ function buildLevel(level) {
   world = new World(seed);                  // generates voxels
   scene.add(world.group);
 
-  const tierIdx = tierForLevel(level);
+  const unit = UNITS[state.unitIdx];
   const count = Math.min(3 + level, 6);
-  const { tierName, questions } = pickQuestions(tierIdx, count);
+  const { stageName, questions } = pickQuestions(unit, level, count);
 
   const rng = (() => { let s = seed ^ 0x55aa; return () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; }; })();
   objectives = new Objectives(scene, world, questions, rng); // edits voxels
@@ -203,7 +202,7 @@ function buildLevel(level) {
   cancelMining();
 
   renderHotbar();
-  el.hudTier.textContent = `📚 ${tierName} — dig to ${objectives.total} glowing beacons`;
+  el.hudTier.textContent = `📚 ${unit.name}: ${stageName} — dig to ${objectives.total} glowing beacons`;
   updateHud();
   setTimeout(() => el.loading.classList.add('hidden'), 150);
 }
@@ -331,6 +330,29 @@ function completeLevel() {
      <div>🔑 Questions solved: <b>${state.keysTotal}</b></div>`;
   el.levelend.classList.remove('hidden');
 }
+
+// ---- Unit picker (start screen) ----
+// Buttons are generated from UNITS so adding a unit in questions.js is enough.
+const unitPicker = document.getElementById('unit-picker');
+function renderUnitPicker() {
+  unitPicker.innerHTML = '';
+  UNITS.forEach((u, i) => {
+    const b = document.createElement('button');
+    b.className = 'unit-btn' + (i === state.unitIdx ? ' sel' : '');
+    b.innerHTML =
+      `<span class="unit-emoji">${u.emoji}</span>` +
+      `<span class="unit-name">${u.name}</span>` +
+      `<span class="unit-blurb">${u.blurb}</span>`;
+    b.addEventListener('click', () => {
+      state.unitIdx = i;
+      Sfx.unlock();
+      Sfx.click();
+      renderUnitPicker();
+    });
+    unitPicker.appendChild(b);
+  });
+}
+renderUnitPicker();
 
 // ---- Start / next ----
 function startGame() {
