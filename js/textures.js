@@ -39,6 +39,13 @@ function makeNoisyCanvas(base, speckle, seed, opts = {}) {
       ctx.fillRect(x, 0, 1, h);
     }
   }
+  if (opts.stripes) {
+    // vertical darker ribs (cactus-side look)
+    for (let x = 1; x < SIZE; x += 4) {
+      ctx.fillStyle = opts.stripes;
+      ctx.fillRect(x, 0, 1, SIZE);
+    }
+  }
   return c;
 }
 
@@ -86,6 +93,16 @@ export const BlockTex = {
     makeNoisyCanvas('#3f8a2e', ['#347526', '#4aa036', '#2c6620'], 18, { density: 0.7 })),
   water: () => tex('water', () =>
     makeNoisyCanvas('#2f6fd8', ['#2a64c4', '#3a7ce8'], 19, { density: 0.3 })),
+  snow: () => tex('snow', () =>
+    makeNoisyCanvas('#f4f8fc', ['#e8eef6', '#ffffff', '#dde6f0'], 20, { density: 0.4 })),
+  ice: () => tex('ice', () =>
+    makeNoisyCanvas('#a8d4ee', ['#98c8e6', '#bce0f6', '#8cbede'], 21, { density: 0.35 })),
+  cactusSide: () => tex('cactusSide', () =>
+    makeNoisyCanvas('#3e8f3e', ['#357f35', '#4aa04a', '#2c702c'], 22, { density: 0.5, stripes: '#2a662a' })),
+  cactusTop: () => tex('cactusTop', () =>
+    makeNoisyCanvas('#4aa04a', ['#3e8f3e', '#58b058'], 23, { density: 0.5 })),
+  basalt: () => tex('basalt', () =>
+    makeNoisyCanvas('#3a3a42', ['#2e2e36', '#46464f', '#26262c'], 24, { density: 0.55 })),
 };
 
 // Glowing "?" texture + materials for question blocks.
@@ -137,6 +154,21 @@ export function getBlockMaterials(type) {
       break;
     case 'leaves':
       mats = blockMaterials({ top: BlockTex.leaves(), side: BlockTex.leaves() });
+      break;
+    case 'snow':
+      mats = blockMaterials({ top: BlockTex.snow(), side: BlockTex.snow() });
+      break;
+    case 'ice': {
+      // slightly see-through so frozen water reads as ice
+      const m = new THREE.MeshLambertMaterial({ map: BlockTex.ice(), transparent: true, opacity: 0.9 });
+      mats = [m, m, m, m, m, m];
+      break;
+    }
+    case 'cactus':
+      mats = blockMaterials({ top: BlockTex.cactusTop(), side: BlockTex.cactusSide(), bottom: BlockTex.cactusTop() });
+      break;
+    case 'basalt':
+      mats = blockMaterials({ top: BlockTex.basalt(), side: BlockTex.basalt() });
       break;
     // ---- special reward blocks: solid, glowing colours ----
     case 'glow':

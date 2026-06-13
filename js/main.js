@@ -2,11 +2,12 @@
 // blocks, answer English questions for keys, BUILD with what you mine, then open
 // the portal to advance.
 import * as THREE from 'three';
-import { World, WORLD_SIZE, B, BLOCK_INFO, hardness, T, TOOL_INFO, toolFactor } from './world.js';
+import { World, WORLD_SIZE, B, BLOCK_INFO, hardness, T, TOOL_INFO, toolFactor, ID_BY_NAME } from './world.js';
+import { DIMENSIONS } from './dimensions.js';
 import { Player } from './player.js';
 import { Objectives } from './objectives.js';
 import { Quiz } from './quiz.js';
-import { pickQuestions, TIERS } from './questions.js';
+import { pickQuestions, UNITS } from './questions.js';
 import { Sfx, Music } from './audio.js';
 import { ViewModel } from './viewmodel.js';
 import { getCrackTexture, getToolIcon } from './textures.js';
@@ -56,6 +57,8 @@ const HOTBAR = [
 const REWARD_BLOCKS = [B.GLOW, B.RUBY, B.SAPPHIRE];
 const state = {
   level: 1, score: 0, streak: 0, bestStreak: 0,
+  unitIdx: 0,               // which textbook unit was picked on the start screen
+  dimIdx: 0,                // which world (dimension) was picked on the start screen
   keys: 0, keysTotal: 0, playing: false,
   inv: {}, selected: 0,     // start holding the Pickaxe
   pickFactor: 1,            // base mining speed multiplier (rises with level)
@@ -166,20 +169,25 @@ function renderHotbar() {
 }
 
 // ---- Level building ----
-function tierForLevel(level) { return Math.min(level - 1, TIERS.length - 1); }
-
 function buildLevel(level) {
   el.loading.classList.remove('hidden');
   if (objectives) objectives.dispose();
   if (world) { scene.remove(world.group); world.dispose(); }
 
-  const seed = (level * 92821 + 7) >>> 0;
-  world = new World(seed);                  // generates voxels
+  const dim = DIMENSIONS[state.dimIdx];
+  const seed = ((level * 92821 + 7) ^ (state.dimIdx * 131071)) >>> 0;
+  world = new World(seed, dim);             // generates voxels
   scene.add(world.group);
 
-  const tierIdx = tierForLevel(level);
+  // themed sky + fog
+  scene.background.set(dim.sky);
+  scene.fog.color.set(dim.sky);
+  scene.fog.near = dim.fog[0];
+  scene.fog.far = dim.fog[1];
+
+  const unit = UNITS[state.unitIdx];
   const count = Math.min(3 + level, 6);
-  const { tierName, questions } = pickQuestions(tierIdx, count);
+  const { stageName, questions } = pickQuestions(unit, level, count);
 
   const rng = (() => { let s = seed ^ 0x55aa; return () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; }; })();
   objectives = new Objectives(scene, world, questions, rng); // edits voxels
@@ -191,9 +199,12 @@ function buildLevel(level) {
 
   state.keys = 0;
   state.keysTotal = objectives.total;
+  // the hotbar's 3 buildable slots come from the dimension
+  const dimBlocks = dim.hotbar.map((n) => ID_BY_NAME[n]);
+  HOTBAR.splice(4, 3, ...dimBlocks.map((id) => ({ kind: 'block', id })));
   // starter blocks so you can build right away (plus whatever you mine)
   state.inv = {
-    [B.GRASS]: 0, [B.DIRT]: 0, [B.STONE]: 20, [B.SAND]: 0, [B.WOOD]: 10, [B.LEAVES]: 0,
+    [dimBlocks[0]]: 20, [dimBlocks[1]]: 10, [dimBlocks[2]]: 0,
     [B.GLOW]: 0, [B.RUBY]: 0, [B.SAPPHIRE]: 0,
   };
   // pickaxe tier rises with level (wood -> stone -> iron), mining faster each time
@@ -203,7 +214,7 @@ function buildLevel(level) {
   cancelMining();
 
   renderHotbar();
-  el.hudTier.textContent = `📚 ${tierName} — dig to ${objectives.total} glowing beacons`;
+  el.hudTier.textContent = `${dim.emoji} ${dim.name} • 📚 ${unit.name}: ${stageName} — dig to ${objectives.total} glowing beacons`;
   updateHud();
   setTimeout(() => el.loading.classList.add('hidden'), 150);
 }
@@ -331,6 +342,35 @@ function completeLevel() {
      <div>🔑 Questions solved: <b>${state.keysTotal}</b></div>`;
   el.levelend.classList.remove('hidden');
 }
+
+// ---- Start-screen pickers (unit + world) ----
+// Buttons are generated from data (UNITS / DIMENSIONS), so adding an entry
+// in questions.js or dimensions.js is enough — no UI changes needed.
+function renderPicker(container, items, selIdx, onPick, compact) {
+  container.innerHTML = '';
+  items.forEach((it, i) => {
+    const b = document.createElement('button');
+    b.className = 'unit-btn' + (compact ? ' compact' : '') + (i === selIdx ? ' sel' : '');
+    b.innerHTML =
+      `<span class="unit-emoji">${it.emoji}</span>` +
+      `<span class="unit-name">${it.name}</span>` +
+      (compact ? '' : `<span class="unit-blurb">${it.blurb}</span>`);
+    if (compact) b.title = it.blurb;
+    b.addEventListener('click', () => {
+      Sfx.unlock();
+      Sfx.click();
+      onPick(i);
+    });
+    container.appendChild(b);
+  });
+}
+function renderPickers() {
+  renderPicker(document.getElementById('unit-picker'), UNITS, state.unitIdx,
+    (i) => { state.unitIdx = i; renderPickers(); });
+  renderPicker(document.getElementById('dim-picker'), DIMENSIONS, state.dimIdx,
+    (i) => { state.dimIdx = i; renderPickers(); }, true);
+}
+renderPickers();
 
 // ---- Start / next ----
 function startGame() {

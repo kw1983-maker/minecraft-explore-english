@@ -240,6 +240,48 @@ kbd {
   margin-bottom: 22px;
 }
 
+.unit-label { font-size: 15px; color: #d6d6ec; margin-bottom: 10px; }
+
+.unit-picker {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 22px;
+}
+
+.unit-btn {
+  font-family: inherit;
+  color: #e8e8f4;
+  background: rgba(0,0,0,0.25);
+  border: 3px solid #4a4a66;
+  border-bottom-width: 5px;
+  border-radius: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+  width: 168px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  transition: transform 0.08s, filter 0.15s, border-color 0.15s;
+}
+.unit-btn:hover { filter: brightness(1.15); }
+.unit-btn:active { transform: translateY(2px); border-bottom-width: 3px; }
+.unit-btn.sel {
+  border-color: var(--gold);
+  background: rgba(255,210,63,0.12);
+  box-shadow: 0 0 14px rgba(255,210,63,0.25);
+}
+.unit-btn .unit-emoji { font-size: 28px; line-height: 1; }
+.unit-btn .unit-name { font-size: 14px; font-weight: bold; color: var(--gold); }
+.unit-btn .unit-blurb { font-size: 11px; color: #b8b8d4; line-height: 1.3; }
+
+/* compact variant (world picker): emoji + name only, five fit in one row */
+.unit-btn.compact { width: 92px; padding: 8px 4px; }
+.unit-btn.compact .unit-emoji { font-size: 22px; }
+.unit-btn.compact .unit-name { font-size: 12px; }
+
 .btn-big {
   font-family: inherit;
   font-size: 22px;
@@ -336,4 +378,6 @@ kbd {
   .logo { font-size: 40px; }
   .quiz-options { grid-template-columns: 1fr; }
   .how { grid-template-columns: 1fr; }
+  .unit-btn { width: 100%; }
+  .unit-btn.compact { width: calc(33.3% - 8px); }
 }

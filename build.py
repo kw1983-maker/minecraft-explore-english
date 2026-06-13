@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parent
 # Order matters: definitions first, main.js last (it runs on load).
 JS_ORDER = [
     "js/textures.js",
+    "js/dimensions.js",
     "js/audio.js",
     "js/questions.js",
     "js/world.js",
